@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lumi
+
+Lumi is a mobile-first Next.js MVP for an AI Agent social app. The first Agent is Mochi, a cotton-elf fashion companion for text chat, realtime voice styling, and outfit camera analysis.
+
+The frontend runs independently with a mock API adapter. Set `NEXT_PUBLIC_API_BASE_URL` to connect the same UI to an external backend.
+
+Chat is already wired to the GoClaw Agent endpoint from Apifox through a local Next.js proxy route. The defaults match the LAN API at `http://192.168.7.231:9600` and can be overridden with the variables in `.env.example`.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to see the app.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Useful docs:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `docs/product/lumi-mvp.md`
+- `docs/characters/mochi.md`
+- `docs/api/frontend-contract.md`
 
-## Learn More
+## Scripts
 
-To learn more about Next.js, take a look at the following resources:
+- `pnpm dev` starts the app.
+- `pnpm lint` runs ESLint.
+- `pnpm test` runs Vitest unit/component checks.
+- `pnpm e2e` runs Playwright mobile smoke tests.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## MVP Scope
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+In scope: Home, onboarding, Mochi text chat, Live state flow, Snap analysis, saved looks, profile/settings, mock API, and frontend/backend contract docs.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Out of scope: full community feed, friends, comments, DMs, multi-agent selection, shopping, and backend services.

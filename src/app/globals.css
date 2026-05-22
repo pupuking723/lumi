@@ -1,26 +1,133 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #eeedf1;
+  --foreground: #242235;
+  --cream: #f6f3ef;
+  --lilac: #cfc5d9;
+  --lilac-deep: #746783;
+  --emerald: #157464;
+  --gold: #b99955;
+  --rose: #dba9b9;
+  --mint: #b6cbc8;
+  --denim: #aeb9ca;
+  --coral: #d9aaa0;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-nunito);
+  --font-display: var(--font-fraunces);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-nunito), Arial, Helvetica, sans-serif;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+* {
+  scrollbar-color: rgba(111, 104, 128, 0.42) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(226, 224, 232, 0.76)),
+    rgba(111, 104, 128, 0.28);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.82) inset;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(213, 211, 221, 0.9)),
+    rgba(76, 71, 91, 0.36);
+  background-clip: padding-box;
+}
+
+.scrollbar-pearl {
+  scrollbar-gutter: stable;
+}
+
+.scrollbar-pearl::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-pearl::-webkit-scrollbar-thumb {
+  border-width: 2px;
+}
+
+button,
+a,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: #dfc3ec;
+  color: #242235;
+}
+
+.lumi-grain {
+  background-color: #eeedf1;
+  background-image:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.32) 0 1px, transparent 1px 96px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(232, 231, 237, 0.9)),
+    linear-gradient(135deg, #f7f6f8 0%, #e6e5eb 100%);
+  background-size: 96px 100%, 100% 100%, 100% 100%;
+}
+
+.patchwork {
+  background:
+    linear-gradient(90deg, rgba(217, 192, 235, 0.82), rgba(246, 168, 200, 0.7)),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.32) 0 8px,
+      rgba(200, 156, 70, 0.2) 8px 16px
+    );
+}
+
+.soft-stitch {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.82) inset,
+    0 18px 42px rgba(42, 38, 58, 0.12);
+}
+
+.pearl-surface {
+  background: rgba(252, 251, 252, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.92) inset,
+    0 18px 52px rgba(50, 46, 63, 0.14);
+  backdrop-filter: blur(24px) saturate(1.12);
+}
+
+.wave-bar {
+  animation: lumi-wave 1.05s ease-in-out infinite;
+}
+
+@keyframes lumi-wave {
+  0%,
+  100% {
+    transform: scaleY(0.42);
+  }
+  50% {
+    transform: scaleY(1);
+  }
 }
