@@ -36,12 +36,16 @@ export function ChatView() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const voiceFrameRef = useRef<number | null>(null);
+  const streamingAssistantIdRef = useRef<string | null>(null);
   const [draft, setDraft] = useState("");
   const [attachmentName, setAttachmentName] = useState("");
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceError, setVoiceError] = useState("");
   const [voiceLevels, setVoiceLevels] = useState(DEFAULT_VOICE_LEVELS);
+  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(
+    null,
+  );
 
   const conversationQuery = useQuery({
     queryKey: ["mochi-conversation"],
@@ -60,6 +64,10 @@ export function ChatView() {
     queryFn: () => apiClient.listMessages(conversationId as string),
   });
   const messages = messagesQuery.data ?? [];
+  const streamingAssistant = streamingAssistantId
+    ? messages.find((message) => message.id === streamingAssistantId)
+    : undefined;
+  const lastMessageContent = messages.at(-1)?.content;
 
   const stopVoiceSession = useCallback((resetState = true) => {
     if (voiceFrameRef.current !== null) {
@@ -143,18 +151,41 @@ export function ChatView() {
     SendMessageResult,
     Error,
     SendMessageInput,
-    { optimisticId: string; previousMessages: ChatMessage[] }
+    {
+      optimisticId: string;
+      optimisticAssistantId: string;
+    }
   >({
     mutationFn: (input: SendMessageInput) =>
       apiClient.sendMessage(conversationId as string, {
         ...input,
         history: messagesQuery.data ?? [],
+        onAssistantDelta: (delta) => {
+          const assistantId = streamingAssistantIdRef.current;
+          if (!assistantId) return;
+
+          queryClient.setQueryData<ChatMessage[]>(
+            messagesKey,
+            (current = []) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      content: `${message.content}${delta}`,
+                      status: "sending",
+                    }
+                  : message,
+              ),
+          );
+        },
       }),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: messagesKey });
       const previousMessages =
         queryClient.getQueryData<ChatMessage[]>(messagesKey) ?? [];
-      const optimisticId = `msg-pending-${Date.now()}`;
+      const pendingSeed = Date.now();
+      const optimisticId = `msg-pending-${pendingSeed}`;
+      const optimisticAssistantId = `msg-stream-${pendingSeed}`;
       const optimisticMessage: ChatMessage = {
         id: optimisticId,
         conversationId: conversationId as string,
@@ -165,34 +196,81 @@ export function ChatView() {
         status: "sent",
         createdAt: new Date().toISOString(),
       };
+      const optimisticAssistantMessage: ChatMessage = {
+        id: optimisticAssistantId,
+        conversationId: conversationId as string,
+        role: "mochi",
+        kind: "text",
+        content: "",
+        status: "sending",
+        createdAt: new Date().toISOString(),
+      };
+
+      streamingAssistantIdRef.current = optimisticAssistantId;
+      setStreamingAssistantId(optimisticAssistantId);
 
       queryClient.setQueryData<ChatMessage[]>(
         messagesKey,
-        [...previousMessages, optimisticMessage],
+        [...previousMessages, optimisticMessage, optimisticAssistantMessage],
       );
       setDraft("");
       setAttachmentName("");
-      return { optimisticId, previousMessages };
+      return { optimisticId, optimisticAssistantId };
     },
     onSuccess: (result, _variables, context) => {
-      queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) => [
-        ...current.filter((message) => message.id !== context.optimisticId),
-        result.userMessage,
-        result.assistantMessage,
-      ]);
+      if (streamingAssistantIdRef.current === context.optimisticAssistantId) {
+        streamingAssistantIdRef.current = null;
+      }
+      setStreamingAssistantId((current) =>
+        current === context.optimisticAssistantId ? null : current,
+      );
+
+      queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) => {
+        let replacedUser = false;
+        let replacedAssistant = false;
+        const nextMessages = current.map((message) => {
+          if (message.id === context.optimisticId) {
+            replacedUser = true;
+            return result.userMessage;
+          }
+
+          if (message.id === context.optimisticAssistantId) {
+            replacedAssistant = true;
+            return result.assistantMessage;
+          }
+
+          return message;
+        });
+
+        if (!replacedUser) nextMessages.push(result.userMessage);
+        if (!replacedAssistant) nextMessages.push(result.assistantMessage);
+
+        return nextMessages;
+      });
       setLastPayload(null);
     },
     onError: (_error, _variables, context) => {
       if (!context) return;
+      if (streamingAssistantIdRef.current === context.optimisticAssistantId) {
+        streamingAssistantIdRef.current = null;
+      }
+      setStreamingAssistantId((current) =>
+        current === context.optimisticAssistantId ? null : current,
+      );
+
       queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
-        current.map((message) =>
-          message.id === context.optimisticId
-            ? { ...message, status: "failed" }
-            : message,
-        ),
+        current
+          .filter((message) => message.id !== context.optimisticAssistantId)
+          .map((message) =>
+            message.id === context.optimisticId
+              ? { ...message, status: "failed" }
+              : message,
+          ),
       );
     },
   });
+  const showPendingIndicator =
+    sendMutation.isPending && !streamingAssistant?.content;
 
   useEffect(() => {
     const scrollArea = messageScrollRef.current;
@@ -201,7 +279,7 @@ export function ChatView() {
     window.requestAnimationFrame(() => {
       scrollArea.scrollTop = scrollArea.scrollHeight;
     });
-  }, [messages.length, sendMutation.isPending]);
+  }, [messages.length, lastMessageContent, sendMutation.isPending]);
 
   useEffect(() => {
     return () => stopVoiceSession(false);
@@ -231,7 +309,7 @@ export function ChatView() {
   return (
     <AppChrome
       fixedViewport
-      mainClassName="flex min-h-0 flex-col overflow-hidden !pb-[calc(11rem+env(safe-area-inset-bottom))] md:!pb-[6.25rem]"
+      mainClassName="flex min-h-0 flex-col overflow-hidden !pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:!pb-[6.25rem]"
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
         <section
@@ -248,8 +326,8 @@ export function ChatView() {
                 hidden={messages.at(-1)?.role === "user"}
               />
             )}
-            {sendMutation.isPending && (
-              <div className="px-1 py-2 text-sm font-bold text-[#716a7e]">
+            {showPendingIndicator && (
+              <div className="lumi-fade-in px-1 py-2 text-sm font-bold text-[#716a7e]">
                 Mochi is stitching a thought
                 <span className="ml-1 inline-flex gap-1 align-middle">
                   <span className="size-1 rounded-full bg-[#8b8497]" />
@@ -259,7 +337,7 @@ export function ChatView() {
               </div>
             )}
             {sendMutation.isError && (
-              <div className="rounded-[22px] border border-[#ead1d8] bg-[#fff3f5]/86 p-3 text-sm font-bold text-[#9c4a61] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] backdrop-blur-xl">
+              <div className="lumi-fade-in rounded-[22px] border border-[#ead1d8] bg-[#fff3f5]/86 p-3 text-sm font-bold text-[#9c4a61] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] backdrop-blur-xl">
                 The thread snagged.{" "}
                 <button
                   type="button"
@@ -273,7 +351,7 @@ export function ChatView() {
           </div>
         </section>
 
-        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(6.6rem+env(safe-area-inset-bottom))] z-40 px-4 md:bottom-6 md:left-[244px] md:px-0">
+        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(0.85rem+env(safe-area-inset-bottom))] z-40 px-4 md:bottom-6 md:left-[244px] md:px-0">
           <div className="mx-auto w-full max-w-[480px] md:max-w-[760px] md:px-8">
             <form
               onSubmit={onSubmit}
@@ -408,7 +486,7 @@ function PromptSuggestions({
   if (hidden) return null;
 
   return (
-    <div className="flex flex-wrap gap-2 px-1 pt-1">
+    <div className="lumi-fade-in flex flex-wrap gap-2 px-1 pt-1">
       {starterPrompts.slice(0, 3).map((prompt) => (
         <button
           key={prompt}
@@ -425,6 +503,8 @@ function PromptSuggestions({
 
 function MessageItem({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
+  const hasContent = message.content.trim().length > 0;
+  const canShowActions = hasContent && message.status === "sent";
 
   if (!isUser) {
     return (
@@ -433,8 +513,24 @@ function MessageItem({ message }: { message: ChatMessage }) {
           <Sparkles size={13} className="text-[#b99955]" aria-hidden />
           Mochi
         </div>
-        <MarkdownMessage content={message.content} />
-        <AgentMessageActions content={message.content} messageId={message.id} />
+        {hasContent ? (
+          <>
+            <MarkdownMessage content={message.content} />
+            {canShowActions && (
+              <AgentMessageActions
+                content={message.content}
+                messageId={message.id}
+              />
+            )}
+          </>
+        ) : (
+          <div className="lumi-fade-in inline-flex items-center gap-1.5 rounded-full bg-white/56 px-3 py-2 text-sm font-bold text-[#716a7e] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset]">
+            Mochi is listening
+            <span className="size-1 rounded-full bg-[#8b8497]" />
+            <span className="size-1 rounded-full bg-[#8b8497]" />
+            <span className="size-1 rounded-full bg-[#8b8497]" />
+          </div>
+        )}
       </div>
     );
   }
@@ -496,7 +592,7 @@ function AgentMessageActions({
   };
 
   return (
-    <div className="mt-2 flex items-center gap-1.5 text-[#81798e]">
+    <div className="lumi-fade-in mt-2 flex items-center gap-1.5 text-[#81798e]">
       <button
         type="button"
         onClick={copyMessage}

@@ -58,6 +58,7 @@ export interface SendMessageInput {
   content: string;
   imageUrl?: string;
   history?: ChatMessage[];
+  onAssistantDelta?: (delta: string) => void;
 }
 
 export interface SendMessageResult {

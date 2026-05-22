@@ -40,7 +40,7 @@ export function MemoryView() {
         <section className="rounded-[30px] border border-white/70 bg-white/72 p-4 soft-stitch">
           <Pill tone="emerald">Memory layer</Pill>
           <h1 className="mt-3 font-display text-4xl font-semibold leading-none text-[#343145]">
-            Closy remembers you
+            mochi remembers you
           </h1>
           <p className="mt-3 text-sm font-semibold leading-6 text-[#716a7e]">
             Your repeated style notes, preferences, and recent mood live here so
@@ -90,7 +90,7 @@ export function MemoryView() {
             </p>
             <p className="mt-1 text-sm font-semibold leading-5 text-[#716a7e]">
               {latestLook?.analysis.mochiLine ??
-                "Snap an outfit and Closy will remember the key style notes."}
+                "Snap an outfit and mochi will remember the key style notes."}
             </p>
           </div>
         </section>
@@ -149,7 +149,7 @@ export function MemoryView() {
 
         <Button className="w-full">
           <Sparkles size={17} aria-hidden />
-          Ask Closy to refresh my memory
+          Ask mochi to refresh my memory
         </Button>
       </div>
     </AppChrome>

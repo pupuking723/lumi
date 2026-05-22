@@ -43,7 +43,7 @@ const profileItems = [
   },
   {
     label: "Memory management",
-    description: "Review, update, or clear what Closy remembers",
+    description: "Review, update, or clear what mochi remembers",
     href: "/memory",
     icon: Brain,
   },
@@ -66,7 +66,7 @@ export function ProfileView({ settings = false }: { settings?: boolean }) {
             </h1>
             <p className="mt-3 text-sm font-semibold leading-5 text-[#716a7e]">
               Manage your account, notifications, subscription, privacy, and
-              how Closy remembers you.
+              how mochi remembers you.
             </p>
           </div>
           <MochiPortrait variant="variants" className="min-h-[170px]" />

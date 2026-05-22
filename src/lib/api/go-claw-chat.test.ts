@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { extractGoClawAssistantText, toGoClawMessages } from "./go-claw-chat";
+import {
+  collectGoClawEventStream,
+  extractGoClawAssistantText,
+  toGoClawMessages,
+} from "./go-claw-chat";
 import type { ChatMessage } from "@/types/lumi";
 
 describe("GoClaw chat adapter", () => {
@@ -35,5 +39,36 @@ describe("GoClaw chat adapter", () => {
     });
 
     expect(text).toBe("Hi darling.");
+  });
+
+  it("collects assistant content from event-stream deltas", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}\n\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'data: {"id":"chatcmpl-test","choices":[{"delta":{"content":" there"},"finish_reason":null}]}\n\n',
+          ),
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    const deltas: string[] = [];
+
+    const result = await collectGoClawEventStream(stream, (delta) =>
+      deltas.push(delta),
+    );
+
+    expect(result).toEqual({
+      content: "Hi there",
+      upstreamId: "chatcmpl-test",
+    });
+    expect(deltas).toEqual(["Hi", " there"]);
   });
 });

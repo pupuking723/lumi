@@ -4,7 +4,7 @@ Lumi is a mobile-first Next.js MVP for an AI Agent social app. The first Agent i
 
 The frontend runs independently with a mock API adapter. Set `NEXT_PUBLIC_API_BASE_URL` to connect the same UI to an external backend.
 
-Chat is already wired to the GoClaw Agent endpoint from Apifox through a local Next.js proxy route. The defaults match the LAN API at `http://192.168.7.231:9600` and can be overridden with the variables in `.env.example`.
+Chat is already wired to the GoClaw Agent endpoint from Apifox through a local Next.js proxy route. The defaults match the LAN API at `http://192.168.6.203:9600` and can be overridden with the variables in `.env.example`.
 
 ## Getting Started
 

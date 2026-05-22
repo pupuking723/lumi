@@ -5,11 +5,11 @@ The frontend uses `src/lib/api/client.ts`. If `NEXT_PUBLIC_API_BASE_URL` is empt
 ## GoClaw Chat Integration
 
 - Frontend proxy: `POST /api/chat/completions`.
-- Upstream endpoint: `POST http://192.168.7.231:9600/v1/chat/completions`.
+- Upstream endpoint: `POST http://192.168.6.203:9600/v1/chat/completions`.
 - Upstream model: `agent:fox-spirit`.
 - Upstream headers: `X-GoClaw-User-Id: user-a`, `X-GoClaw-Tenant-Id: default`, `Accept-Language: zh`, `Authorization: Bearer dev-token`.
-- Request shape sent upstream: `{ model, messages, stream: false }`.
-- Response shape expected upstream: OpenAI-compatible chat completion JSON with `choices[0].message.content`.
+- Request shape sent upstream: `{ model, messages, stream: true }`.
+- Response shape expected upstream: `text/event-stream` chunks shaped like `data: {"choices":[{"delta":{"content":"..."}}]}` and ending with `data: [DONE]`.
 - Set `NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH=off` to force local mock chat responses.
 
 Server-side environment variables are documented in `.env.example`; the code includes the same Apifox defaults for local development.
