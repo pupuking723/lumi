@@ -8,9 +8,10 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm exec next dev -p 3100",
+    command: "PORT=3100 pnpm dev",
     env: {
       NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH: "off",
+      NEXT_PUBLIC_LUMI_UPLOAD_PROXY_PATH: "off",
     },
     url: "http://127.0.0.1:3100",
     reuseExistingServer: false,
@@ -18,9 +19,9 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "mobile-safari",
+      name: "mobile-chrome",
       use: {
-        ...devices["iPhone 15"],
+        ...devices["Pixel 7"],
       },
     },
   ],

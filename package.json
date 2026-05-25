@@ -9,6 +9,8 @@
     "start": "NODE_ENV=production node server.mjs",
     "lint": "eslint",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:ci": "pnpm lint && pnpm test && pnpm e2e && pnpm build",
     "test:watch": "vitest",
     "e2e": "playwright test"
   },
@@ -36,6 +38,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "jsdom": "^29.1.1",
