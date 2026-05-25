@@ -90,7 +90,7 @@ describe("ChatView", () => {
   it("sends text messages and renders streaming assistant deltas", async () => {
     renderWithQueryClient(<ChatView />);
 
-    const input = await screen.findByPlaceholderText("Ask Mochi about the look...");
+    const input = await screen.findByPlaceholderText("Ask Mochi...");
     fireEvent.change(input, { target: { value: "Color help?" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -109,7 +109,7 @@ describe("ChatView", () => {
     const { container } = renderWithQueryClient(<ChatView />);
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
 
-    await screen.findByPlaceholderText("Ask Mochi about the look...");
+    await screen.findByPlaceholderText("Ask Mochi...");
     fireEvent.change(fileInput, {
       target: {
         files: [new File(["image"], "look.png", { type: "image/png" })],
@@ -126,7 +126,7 @@ describe("ChatView", () => {
       },
     });
     expect(await screen.findByText("Ready for Mochi")).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Ask Mochi about the look..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask Mochi..."), {
       target: { value: "Review this" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -180,7 +180,7 @@ describe("ChatView", () => {
     renderWithQueryClient(<ChatView />);
 
     fireEvent.change(
-      await screen.findByPlaceholderText("Ask Mochi about the look..."),
+      await screen.findByPlaceholderText("Ask Mochi..."),
       { target: { value: "Help" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));

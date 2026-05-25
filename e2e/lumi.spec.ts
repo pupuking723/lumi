@@ -31,7 +31,7 @@ test("chat image attachments can be removed and sent", async ({ page }) => {
   await page.goto("/chat");
   await expect(page.getByPlaceholder("Ask Mochi about the look...")).toBeVisible();
 
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.locator('input[type="file"]').first().setInputFiles({
     name: "look.png",
     mimeType: "image/png",
     buffer: Buffer.from("image"),
@@ -40,7 +40,7 @@ test("chat image attachments can be removed and sent", async ({ page }) => {
   await page.getByText("remove").click();
   await expect(page.getByText("Ready for Mochi")).toBeHidden();
 
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.locator('input[type="file"]').first().setInputFiles({
     name: "look.png",
     mimeType: "image/png",
     buffer: Buffer.from("image"),

@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -9,17 +17,23 @@ import remarkGfm from "remark-gfm";
 import {
   Check,
   Copy,
-  ImagePlus,
+  Camera,
+  Images,
   Mic,
   PhoneOff,
   SendHorizonal,
-  Sparkles,
   Square,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
 import { AppChrome } from "./app-chrome";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { apiClient } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { starterPrompts } from "@/lib/data/mochi";
@@ -40,8 +54,7 @@ import type {
 } from "@/types/lumi";
 
 const DEFAULT_VOICE_LEVELS = [
-  0.34, 0.52, 0.42, 0.7, 0.48, 0.82, 0.56, 0.76, 0.44, 0.62, 0.38,
-  0.58,
+  0.34, 0.52, 0.42, 0.7, 0.48, 0.82, 0.56, 0.76, 0.44, 0.62, 0.38, 0.58,
 ];
 
 type PendingAttachment = ChatAttachment & {
@@ -56,7 +69,10 @@ function isAbortError(error: unknown) {
 
 export function ChatView() {
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const composerBodyRef = useRef<HTMLDivElement>(null);
+  const draftInputRef = useRef<HTMLTextAreaElement>(null);
   const messageScrollRef = useRef<HTMLElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const attachmentUrlsRef = useRef<Set<string>>(new Set());
@@ -69,12 +85,14 @@ export function ChatView() {
   const liveManualStopRef = useRef(false);
   const liveReconnectAttemptRef = useRef(0);
   const liveReconnectTimerRef = useRef<number | null>(null);
-  const startVoiceSessionRef = useRef<(resetReconnect?: boolean) => Promise<void>>(
-    async () => undefined,
-  );
+  const startVoiceSessionRef = useRef<
+    (resetReconnect?: boolean) => Promise<void>
+  >(async () => undefined);
   const voiceFrameRef = useRef<number | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [composerMultiline, setComposerMultiline] = useState(false);
+  const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [sessionId, setSessionId] = useState(() =>
     typeof window === "undefined" ? "" : getOrCreateMochiSessionId(),
@@ -85,9 +103,9 @@ export function ChatView() {
   const [voiceStatus, setVoiceStatus] = useState<LiveConnectionStatus>("idle");
   const [voiceError, setVoiceError] = useState("");
   const [voiceLevels, setVoiceLevels] = useState(DEFAULT_VOICE_LEVELS);
-  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(
-    null,
-  );
+  const [streamingAssistantId, setStreamingAssistantId] = useState<
+    string | null
+  >(null);
 
   const conversationQuery = useQuery({
     queryKey: ["mochi-conversation"],
@@ -208,188 +226,201 @@ export function ChatView() {
     }
   }, []);
 
-  const startVoiceSession = useCallback(async (resetReconnect = true) => {
-    liveManualStopRef.current = false;
-    if (resetReconnect) {
-      liveReconnectAttemptRef.current = 0;
-    }
-    setVoiceError("");
-    setVoiceStatus("connecting");
+  const startVoiceSession = useCallback(
+    async (resetReconnect = true) => {
+      liveManualStopRef.current = false;
+      if (resetReconnect) {
+        liveReconnectAttemptRef.current = 0;
+      }
+      setVoiceError("");
+      setVoiceStatus("connecting");
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setVoiceError("Microphone access is not available in this browser.");
-      setVoiceStatus("error");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const AudioContextCtor =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-
-      if (!AudioContextCtor) {
-        throw new Error("Web Audio is not available in this browser.");
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setVoiceError("Microphone access is not available in this browser.");
+        setVoiceStatus("error");
+        return;
       }
 
-      const audioContext = new AudioContextCtor();
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.72;
-      source.connect(analyser);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        const AudioContextCtor =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
 
-      mediaStreamRef.current = stream;
-      audioContextRef.current = audioContext;
-      analyserRef.current = analyser;
-      setVoiceActive(true);
+        if (!AudioContextCtor) {
+          throw new Error("Web Audio is not available in this browser.");
+        }
 
-      const socket = new WebSocket(
-        getLiveWebSocketUrl(sessionId || getOrCreateMochiSessionId()),
-      );
-      liveSocketRef.current = socket;
+        const audioContext = new AudioContextCtor();
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.72;
+        source.connect(analyser);
 
-      socket.addEventListener("open", () => {
-        setVoiceStatus("listening");
-        socket.send(
-          JSON.stringify({
-            type: "start",
-            session_id: sessionId || getOrCreateMochiSessionId(),
-            source: "chat",
-            mode: "voice",
-          }),
+        mediaStreamRef.current = stream;
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+        setVoiceActive(true);
+
+        const socket = new WebSocket(
+          getLiveWebSocketUrl(sessionId || getOrCreateMochiSessionId()),
         );
+        liveSocketRef.current = socket;
 
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm";
-        const recorder = new MediaRecorder(stream, { mimeType });
-        mediaRecorderRef.current = recorder;
+        socket.addEventListener("open", () => {
+          setVoiceStatus("listening");
+          socket.send(
+            JSON.stringify({
+              type: "start",
+              session_id: sessionId || getOrCreateMochiSessionId(),
+              source: "chat",
+              mode: "voice",
+            }),
+          );
 
-        recorder.addEventListener("dataavailable", (event) => {
-          if (!event.data.size || socket.readyState !== WebSocket.OPEN) return;
+          const mimeType = MediaRecorder.isTypeSupported(
+            "audio/webm;codecs=opus",
+          )
+            ? "audio/webm;codecs=opus"
+            : "audio/webm";
+          const recorder = new MediaRecorder(stream, { mimeType });
+          mediaRecorderRef.current = recorder;
 
-          void blobToDataUrl(event.data).then((dataUrl) => {
-            const payload = dataUrlPayload(dataUrl);
-            socket.send(
-              JSON.stringify({
-                type: "audio",
-                data: payload.data,
-                mime_type: payload.mimeType,
-                source: "chat",
-                turn_complete: false,
-              }),
-            );
+          recorder.addEventListener("dataavailable", (event) => {
+            if (!event.data.size || socket.readyState !== WebSocket.OPEN)
+              return;
+
+            void blobToDataUrl(event.data).then((dataUrl) => {
+              const payload = dataUrlPayload(dataUrl);
+              socket.send(
+                JSON.stringify({
+                  type: "audio",
+                  data: payload.data,
+                  mime_type: payload.mimeType,
+                  source: "chat",
+                  turn_complete: false,
+                }),
+              );
+            });
           });
+
+          recorder.start(250);
         });
 
-        recorder.start(250);
-      });
+        socket.addEventListener("message", (event) => {
+          if (event.data instanceof Blob) {
+            setVoiceStatus("responding");
+            void event.data.arrayBuffer().then(playLiveAudioBuffer);
+            return;
+          }
 
-      socket.addEventListener("message", (event) => {
-        if (event.data instanceof Blob) {
-          setVoiceStatus("responding");
-          void event.data.arrayBuffer().then(playLiveAudioBuffer);
-          return;
-        }
+          if (event.data instanceof ArrayBuffer) {
+            setVoiceStatus("responding");
+            void playLiveAudioBuffer(event.data);
+            return;
+          }
 
-        if (event.data instanceof ArrayBuffer) {
-          setVoiceStatus("responding");
-          void playLiveAudioBuffer(event.data);
-          return;
-        }
+          const parsed = parseLiveEvent(event.data);
+          if (!parsed) return;
 
-        const parsed = parseLiveEvent(event.data);
-        if (!parsed) return;
+          const eventType = parsed.type ?? parsed.event;
+          if (eventType === "ready") {
+            setVoiceStatus("listening");
+            return;
+          }
 
-        const eventType = parsed.type ?? parsed.event;
-        if (eventType === "ready") {
-          setVoiceStatus("listening");
-          return;
-        }
+          if (eventType === "error") {
+            setVoiceError(parsed.message ?? "Live voice connection failed.");
+            setVoiceStatus("error");
+            return;
+          }
 
-        if (eventType === "error") {
-          setVoiceError(parsed.message ?? "Live voice connection failed.");
+          if (eventType === "done" || parsed.done) {
+            setVoiceStatus("listening");
+            return;
+          }
+
+          const audio =
+            parsed.audio ?? (eventType === "audio" ? parsed.data : undefined);
+          if (audio) {
+            setVoiceStatus("responding");
+            void playLiveAudio(audio);
+            return;
+          }
+
+          const text = parsed.text ?? parsed.message ?? parsed.transcript;
+          if (text) {
+            setVoiceStatus("responding");
+            appendLiveMessage(text);
+          }
+        });
+
+        socket.addEventListener("close", () => {
+          if (
+            !liveManualStopRef.current &&
+            mediaStreamRef.current?.active &&
+            liveReconnectAttemptRef.current < 3
+          ) {
+            liveReconnectAttemptRef.current += 1;
+            setVoiceStatus("connecting");
+            liveReconnectTimerRef.current = window.setTimeout(
+              () => {
+                stopVoiceSession(false);
+                void startVoiceSessionRef.current(false);
+              },
+              700 + liveReconnectAttemptRef.current * 450,
+            );
+            return;
+          }
+
+          setVoiceStatus((current) => (current === "error" ? "error" : "idle"));
+        });
+
+        socket.addEventListener("error", () => {
+          setVoiceError(
+            "Live voice connection failed. Check the proxy and try again.",
+          );
           setVoiceStatus("error");
-          return;
-        }
-
-        if (eventType === "done" || parsed.done) {
-          setVoiceStatus("listening");
-          return;
-        }
-
-        const audio =
-          parsed.audio ?? (eventType === "audio" ? parsed.data : undefined);
-        if (audio) {
-          setVoiceStatus("responding");
-          void playLiveAudio(audio);
-          return;
-        }
-
-        const text = parsed.text ?? parsed.message ?? parsed.transcript;
-        if (text) {
-          setVoiceStatus("responding");
-          appendLiveMessage(text);
-        }
-      });
-
-      socket.addEventListener("close", () => {
-        if (
-          !liveManualStopRef.current &&
-          mediaStreamRef.current?.active &&
-          liveReconnectAttemptRef.current < 3
-        ) {
-          liveReconnectAttemptRef.current += 1;
-          setVoiceStatus("connecting");
-          liveReconnectTimerRef.current = window.setTimeout(() => {
-            stopVoiceSession(false);
-            void startVoiceSessionRef.current(false);
-          }, 700 + liveReconnectAttemptRef.current * 450);
-          return;
-        }
-
-        setVoiceStatus((current) => (current === "error" ? "error" : "idle"));
-      });
-
-      socket.addEventListener("error", () => {
-        setVoiceError("Live voice connection failed. Check the proxy and try again.");
-        setVoiceStatus("error");
-      });
-
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const barCount = DEFAULT_VOICE_LEVELS.length;
-
-      const updateLevels = () => {
-        analyser.getByteFrequencyData(data);
-        const bucketSize = Math.max(1, Math.floor(data.length / barCount));
-        const nextLevels = Array.from({ length: barCount }, (_, index) => {
-          const start = index * bucketSize;
-          const bucket = data.slice(start, start + bucketSize);
-          const average =
-            bucket.reduce((total, value) => total + value, 0) / bucket.length;
-          return Math.max(0.18, Math.min(1, average / 150));
         });
 
-        setVoiceLevels(nextLevels);
-        voiceFrameRef.current = window.requestAnimationFrame(updateLevels);
-      };
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const barCount = DEFAULT_VOICE_LEVELS.length;
 
-      updateLevels();
-    } catch {
-      stopVoiceSession(false);
-      setVoiceActive(false);
-      setVoiceStatus("error");
-      setVoiceError("Mic permission is needed for live voice chat.");
-    }
-  }, [
-    appendLiveMessage,
-    playLiveAudio,
-    playLiveAudioBuffer,
-    sessionId,
-    stopVoiceSession,
-  ]);
+        const updateLevels = () => {
+          analyser.getByteFrequencyData(data);
+          const bucketSize = Math.max(1, Math.floor(data.length / barCount));
+          const nextLevels = Array.from({ length: barCount }, (_, index) => {
+            const start = index * bucketSize;
+            const bucket = data.slice(start, start + bucketSize);
+            const average =
+              bucket.reduce((total, value) => total + value, 0) / bucket.length;
+            return Math.max(0.18, Math.min(1, average / 150));
+          });
+
+          setVoiceLevels(nextLevels);
+          voiceFrameRef.current = window.requestAnimationFrame(updateLevels);
+        };
+
+        updateLevels();
+      } catch {
+        stopVoiceSession(false);
+        setVoiceActive(false);
+        setVoiceStatus("error");
+        setVoiceError("Mic permission is needed for live voice chat.");
+      }
+    },
+    [
+      appendLiveMessage,
+      playLiveAudio,
+      playLiveAudioBuffer,
+      sessionId,
+      stopVoiceSession,
+    ],
+  );
 
   useEffect(() => {
     startVoiceSessionRef.current = startVoiceSession;
@@ -412,18 +443,16 @@ export function ChatView() {
           const assistantId = streamingAssistantIdRef.current;
           if (!assistantId) return;
 
-          queryClient.setQueryData<ChatMessage[]>(
-            messagesKey,
-            (current = []) =>
-              current.map((message) =>
-                message.id === assistantId
-                  ? {
-                      ...message,
-                      content: `${message.content}${delta}`,
-                      status: "sending",
-                    }
-                  : message,
-              ),
+          queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
+            current.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    content: `${message.content}${delta}`,
+                    status: "sending",
+                  }
+                : message,
+            ),
           );
         },
         abortSignal: input.abortSignal,
@@ -459,10 +488,11 @@ export function ChatView() {
       streamingAssistantIdRef.current = optimisticAssistantId;
       setStreamingAssistantId(optimisticAssistantId);
 
-      queryClient.setQueryData<ChatMessage[]>(
-        messagesKey,
-        [...previousMessages, optimisticMessage, optimisticAssistantMessage],
-      );
+      queryClient.setQueryData<ChatMessage[]>(messagesKey, [
+        ...previousMessages,
+        optimisticMessage,
+        optimisticAssistantMessage,
+      ]);
       setDraft("");
       setAttachments([]);
       return { optimisticId, optimisticAssistantId };
@@ -557,6 +587,41 @@ export function ChatView() {
     });
   }, [messages.length, lastMessageContent, sendMutation.isPending]);
 
+  const measureDraftInput = useCallback(() => {
+    const input = draftInputRef.current;
+    if (!input) return;
+
+    const styles = window.getComputedStyle(input);
+    const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
+    const paddingY =
+      (Number.parseFloat(styles.paddingTop) || 0) +
+      (Number.parseFloat(styles.paddingBottom) || 0);
+    const singleLineHeight = lineHeight + paddingY;
+    const maxHeight = 112;
+    const composerWidth =
+      composerBodyRef.current?.clientWidth ?? input.clientWidth;
+    const inlineDraftWidth = Math.max(80, composerWidth - 44 * 3 - 8 * 3);
+    const previousWidth = input.style.width;
+
+    input.style.width = `${inlineDraftWidth}px`;
+    input.style.height = "auto";
+    const inlineScrollHeight = input.scrollHeight;
+    input.style.width = previousWidth;
+
+    const nextHeight = Math.min(input.scrollHeight, maxHeight);
+    input.style.height = `${Math.max(nextHeight, singleLineHeight)}px`;
+    setComposerMultiline(inlineScrollHeight > singleLineHeight + 1);
+  }, []);
+
+  useLayoutEffect(() => {
+    measureDraftInput();
+  }, [draft, measureDraftInput]);
+
+  useEffect(() => {
+    window.addEventListener("resize", measureDraftInput);
+    return () => window.removeEventListener("resize", measureDraftInput);
+  }, [measureDraftInput]);
+
   useEffect(() => {
     return () => stopVoiceSession(false);
   }, [stopVoiceSession]);
@@ -643,9 +708,9 @@ export function ChatView() {
           });
       });
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+    setMediaSheetOpen(false);
   };
 
   const stopGeneration = () => {
@@ -685,7 +750,12 @@ export function ChatView() {
       scenario: readyAttachments.length ? "image_review" : "text_chat",
       inputContext: {
         source: "chat",
-        mode: readyAttachments.length && content ? "multimodal" : readyAttachments.length ? "image" : "text",
+        mode:
+          readyAttachments.length && content
+            ? "multimodal"
+            : readyAttachments.length
+              ? "image"
+              : "text",
         refers_to_media_id: readyAttachments[0]?.media_id,
       },
     };
@@ -708,7 +778,7 @@ export function ChatView() {
   return (
     <AppChrome
       fixedViewport
-      mainClassName="flex min-h-0 flex-col overflow-hidden !pb-[calc(6.5rem+env(safe-area-inset-bottom))] md:!pb-[6.25rem]"
+      mainClassName="flex min-h-0 flex-col overflow-hidden !pb-0"
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
         <section
@@ -727,20 +797,11 @@ export function ChatView() {
               />
             )}
             {showPendingIndicator && (
-              <div className="lumi-fade-in px-1 py-2 text-sm font-bold text-[#716a7e]">
-                Mochi is stitching a thought
-                <span className="ml-1 inline-flex gap-1 align-middle">
-                  <span className="size-1 rounded-full bg-[#8b8497]" />
-                  <span className="size-1 rounded-full bg-[#8b8497]" />
-                  <span className="size-1 rounded-full bg-[#8b8497]" />
+              <div className="lumi-fade-in max-w-full px-1 py-2 text-[#343145]">
+                <AgentMessageHeader />
+                <span className="thinking-text-wave text-sm font-bold">
+                  stitching a thought
                 </span>
-                <button
-                  type="button"
-                  onClick={stopGeneration}
-                  className="ml-3 underline"
-                >
-                  Stop
-                </button>
               </div>
             )}
             {sendMutation.isError && !lastSendStopped && (
@@ -758,12 +819,12 @@ export function ChatView() {
           </div>
         </section>
 
-        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(0.85rem+env(safe-area-inset-bottom))] z-40 px-4 md:bottom-6 md:left-[244px] md:px-0">
-          <div className="mx-auto w-full max-w-[480px] md:max-w-[760px] md:px-8">
+        <div className="shrink-0 pb-[calc(0.85rem+env(safe-area-inset-bottom))] pt-2 md:pb-6">
+          <div className="mx-auto w-full max-w-[480px] md:max-w-none">
             <form
               onSubmit={onSubmit}
               className={cn(
-                "pointer-events-auto w-full rounded-[34px] border border-white/82 bg-[#fbfafc]/76 p-2 shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_22px_58px_rgba(42,39,55,0.18)] backdrop-blur-2xl",
+                "w-full rounded-[34px] border border-white/82 bg-[#fbfafc]/76 p-2 shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_22px_58px_rgba(42,39,55,0.18)] backdrop-blur-2xl",
                 voiceActive &&
                   "border-[#ffb0bd]/42 bg-[#b8324d]/92 shadow-[0_1px_0_rgba(255,255,255,0.24)_inset,0_22px_58px_rgba(111,21,42,0.28)]",
               )}
@@ -848,70 +909,155 @@ export function ChatView() {
                       ))}
                     </div>
                   )}
-                  <div className="flex items-end gap-2">
+                  <Sheet open={mediaSheetOpen} onOpenChange={setMediaSheetOpen}>
+                    <MediaSourceSheet
+                      onPickGallery={() => galleryInputRef.current?.click()}
+                      onPickCamera={() => cameraInputRef.current?.click()}
+                    />
+                  </Sheet>
+                  <div
+                    ref={composerBodyRef}
+                    className={cn(
+                      "gap-2",
+                      composerMultiline ? "flex flex-col" : "flex items-end",
+                    )}
+                  >
                     <input
-                      ref={fileInputRef}
+                      ref={galleryInputRef}
                       type="file"
                       accept="image/*"
-                      capture="environment"
-                      multiple
                       className="hidden"
                       onChange={(event) => onFilesSelected(event.target.files)}
                     />
-                    <Button
-                      aria-label="Attach outfit image"
-                      variant="secondary"
-                      size="icon"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="rounded-[24px] text-[#302d43]"
-                    >
-                      <ImagePlus size={19} aria-hidden />
-                    </Button>
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(event) => onFilesSelected(event.target.files)}
+                    />
+                    {!composerMultiline && (
+                      <Button
+                        aria-label="Attach outfit image"
+                        variant="secondary"
+                        size="icon"
+                        onClick={() => setMediaSheetOpen(true)}
+                        className="rounded-[24px] text-[#302d43]"
+                      >
+                        <Camera size={19} aria-hidden />
+                      </Button>
+                    )}
                     <textarea
+                      ref={draftInputRef}
                       value={draft}
                       onChange={(event) => setDraft(event.target.value)}
                       onInput={(event) =>
-                        setDraft((event.currentTarget as HTMLTextAreaElement).value)
+                        setDraft(
+                          (event.currentTarget as HTMLTextAreaElement).value,
+                        )
                       }
-                      placeholder="Ask Mochi about the look..."
+                      placeholder="Ask Mochi..."
                       rows={1}
-                      className="max-h-28 min-h-11 flex-1 resize-none rounded-[24px] border border-white/82 bg-[#f6f5f7]/68 px-4 py-3 text-sm font-extrabold text-[#2b2938] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] outline-none transition focus:border-white focus:bg-white/32 focus:shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_0_0_1px_rgba(255,255,255,0.55)] placeholder:text-[#9d96ab]"
-                    />
-                    <Button
-                      aria-label="Start live voice chat"
-                      variant="secondary"
-                      size="icon"
-                      onClick={() => {
-                        void startVoiceSession();
-                      }}
-                      className="rounded-full text-[#5f586f] hover:text-[#302d43]"
-                    >
-                      <Mic size={19} aria-hidden />
-                    </Button>
-                    <Button
-                      aria-label={
-                        sendMutation.isPending ? "Stop generating" : "Send message"
-                      }
-                      type={sendMutation.isPending ? "button" : "submit"}
-                      size="icon"
-                      onClick={
-                        sendMutation.isPending ? stopGeneration : undefined
-                      }
-                      disabled={
-                        !sendMutation.isPending &&
-                        (!conversationId ||
-                          hasUploadingAttachments ||
-                          hasFailedAttachments ||
-                          (!draft.trim() && !attachments.length))
-                      }
-                      className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
-                    >
-                      {sendMutation.isPending ? (
-                        <Square size={17} aria-hidden />
-                      ) : (
-                        <SendHorizonal size={19} aria-hidden />
+                      className={cn(
+                        "max-h-28 min-h-11 resize-none rounded-[24px] border border-white/82 bg-[#f6f5f7]/68 px-4 py-3 text-sm font-extrabold text-[#2b2938] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] outline-none transition focus:border-white focus:bg-white/32 focus:shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_0_0_1px_rgba(255,255,255,0.55)] placeholder:text-[#9d96ab]",
+                        composerMultiline ? "w-full" : "flex-1",
                       )}
-                    </Button>
+                    />
+                    {composerMultiline ? (
+                      <div className="flex items-end justify-between gap-2">
+                        <Button
+                          aria-label="Attach outfit image"
+                          variant="secondary"
+                          size="icon"
+                          onClick={() => setMediaSheetOpen(true)}
+                          className="rounded-[24px] text-[#302d43]"
+                        >
+                          <Camera size={19} aria-hidden />
+                        </Button>
+                        <div className="flex items-end gap-2">
+                          <Button
+                            aria-label="Start live voice chat"
+                            variant="secondary"
+                            size="icon"
+                            onClick={() => {
+                              void startVoiceSession();
+                            }}
+                            className="rounded-full text-[#5f586f] hover:text-[#302d43]"
+                          >
+                            <Mic size={19} aria-hidden />
+                          </Button>
+                          <Button
+                            aria-label={
+                              sendMutation.isPending
+                                ? "Stop generating"
+                                : "Send message"
+                            }
+                            type={sendMutation.isPending ? "button" : "submit"}
+                            size="icon"
+                            onClick={
+                              sendMutation.isPending
+                                ? stopGeneration
+                                : undefined
+                            }
+                            disabled={
+                              !sendMutation.isPending &&
+                              (!conversationId ||
+                                hasUploadingAttachments ||
+                                hasFailedAttachments ||
+                                (!draft.trim() && !attachments.length))
+                            }
+                            className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
+                          >
+                            {sendMutation.isPending ? (
+                              <Square size={17} aria-hidden />
+                            ) : (
+                              <SendHorizonal size={19} aria-hidden />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <Button
+                          aria-label="Start live voice chat"
+                          variant="secondary"
+                          size="icon"
+                          onClick={() => {
+                            void startVoiceSession();
+                          }}
+                          className="rounded-full text-[#5f586f] hover:text-[#302d43]"
+                        >
+                          <Mic size={19} aria-hidden />
+                        </Button>
+                        <Button
+                          aria-label={
+                            sendMutation.isPending
+                              ? "Stop generating"
+                              : "Send message"
+                          }
+                          type={sendMutation.isPending ? "button" : "submit"}
+                          size="icon"
+                          onClick={
+                            sendMutation.isPending ? stopGeneration : undefined
+                          }
+                          disabled={
+                            !sendMutation.isPending &&
+                            (!conversationId ||
+                              hasUploadingAttachments ||
+                              hasFailedAttachments ||
+                              (!draft.trim() && !attachments.length))
+                          }
+                          className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
+                        >
+                          {sendMutation.isPending ? (
+                            <Square size={17} aria-hidden />
+                          ) : (
+                            <SendHorizonal size={19} aria-hidden />
+                          )}
+                        </Button>
+                      </>
+                    )}
                   </div>
                   {voiceError && (
                     <p className="px-3 pb-1 pt-2 text-xs font-extrabold text-[#9c4a61]">
@@ -925,6 +1071,52 @@ export function ChatView() {
         </div>
       </div>
     </AppChrome>
+  );
+}
+
+function MediaSourceSheet({
+  onPickGallery,
+  onPickCamera,
+}: {
+  onPickGallery: () => void;
+  onPickCamera: () => void;
+}) {
+  return (
+    <SheetContent
+      side="bottom"
+      showCloseButton={false}
+      className="rounded-t-[34px] border-white/70 bg-[#f7f6f8]/94 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-20px_54px_rgba(47,45,58,0.16)] backdrop-blur-2xl"
+    >
+      <SheetTitle className="text-center font-display text-2xl font-semibold text-[#332f43]">
+        Add a look
+      </SheetTitle>
+      <SheetDescription className="sr-only">
+        Choose whether to upload an outfit image from the album or take a new
+        photo.
+      </SheetDescription>
+      <div className="mx-auto flex w-full max-w-[480px] flex-col gap-2">
+        <button
+          type="button"
+          onClick={onPickCamera}
+          className="flex h-14 items-center gap-3 rounded-[24px] border border-white/78 bg-white/66 px-4 text-left text-sm font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.92)_inset]"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-[18px] bg-[#e3e1e8]/78">
+            <Camera size={19} aria-hidden />
+          </span>
+          Take photo
+        </button>
+        <button
+          type="button"
+          onClick={onPickGallery}
+          className="flex h-14 items-center gap-3 rounded-[24px] border border-white/78 bg-white/66 px-4 text-left text-sm font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.92)_inset]"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-[18px] bg-[#e3e1e8]/78">
+            <Images size={19} aria-hidden />
+          </span>
+          Choose from album
+        </button>
+      </div>
+    </SheetContent>
   );
 }
 
@@ -970,11 +1162,25 @@ function PromptSuggestions({
 function WelcomeMessage() {
   return (
     <div className="max-w-full px-1 py-2 text-[#343145]">
-      <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase text-[#716a7e]">
-        <Sparkles size={13} className="text-[#b99955]" aria-hidden />
-        Mochi
-      </div>
+      <AgentMessageHeader />
       <MarkdownMessage content="Hi, I’m Mochi. Send me the outfit, the occasion, or the tiny doubt before you leave. I’ll help with taste, proportion, color, and expression, without pretending to be your doctor, therapist, lawyer, or life oracle." />
+    </div>
+  );
+}
+
+function AgentMessageHeader() {
+  return (
+    <div className="mb-3 flex items-center gap-2.5 text-base font-extrabold leading-none text-[#716a7e]">
+      <Image
+        src="/mochi/mochi-avatar.webp"
+        alt=""
+        width={36}
+        height={36}
+        sizes="36px"
+        className="h-9 w-9 rounded-full object-cover shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_3px_12px_rgba(70,61,92,0.18)]"
+        aria-hidden
+      />
+      Mochi
     </div>
   );
 }
@@ -985,29 +1191,17 @@ function MessageItem({ message }: { message: ChatMessage }) {
   const canShowActions = hasContent && message.status === "sent";
 
   if (!isUser) {
+    if (!hasContent) return null;
+
     return (
       <div className="max-w-full px-1 py-2 text-[#343145]">
-        <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase text-[#716a7e]">
-          <Sparkles size={13} className="text-[#b99955]" aria-hidden />
-          Mochi
-        </div>
-        {hasContent ? (
-          <>
-            <MarkdownMessage content={message.content} />
-            {canShowActions && (
-              <AgentMessageActions
-                content={message.content}
-                messageId={message.id}
-              />
-            )}
-          </>
-        ) : (
-          <div className="lumi-fade-in inline-flex items-center gap-1.5 rounded-full bg-white/56 px-3 py-2 text-sm font-bold text-[#716a7e] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset]">
-            Mochi is listening
-            <span className="size-1 rounded-full bg-[#8b8497]" />
-            <span className="size-1 rounded-full bg-[#8b8497]" />
-            <span className="size-1 rounded-full bg-[#8b8497]" />
-          </div>
+        <AgentMessageHeader />
+        <MarkdownMessage content={message.content} />
+        {canShowActions && (
+          <AgentMessageActions
+            content={message.content}
+            messageId={message.id}
+          />
         )}
       </div>
     );
@@ -1092,7 +1286,11 @@ function AgentMessageActions({
         className="inline-flex size-8 items-center justify-center rounded-full transition hover:text-[#2b2938]"
         aria-label={copied ? "Copied" : "Copy agent message"}
       >
-        {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+        {copied ? (
+          <Check size={14} aria-hidden />
+        ) : (
+          <Copy size={14} aria-hidden />
+        )}
       </button>
       <button
         type="button"

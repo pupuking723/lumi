@@ -62,7 +62,7 @@ export function CameraView() {
     mutationFn: () =>
       apiClient.createLook({
         title: analysis?.title ?? "Mochi fit check",
-        imageUrl: previewUrl || "/mochi/mochi-main.png",
+        imageUrl: previewUrl || "/mochi/mochi-main.webp",
         analysis: analysis as VisionAnalysis,
         visibility: "private",
       }),

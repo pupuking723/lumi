@@ -19,7 +19,7 @@ export function MochiPortrait({
       )}
     >
       <Image
-        src={variant === "main" ? "/mochi/mochi-main.png" : "/mochi/mochi-variants.png"}
+        src={variant === "main" ? "/mochi/mochi-main.webp" : "/mochi/mochi-variants.webp"}
         alt={
           variant === "main"
             ? "Mochi cotton elf character reference"

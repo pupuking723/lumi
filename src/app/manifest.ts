@@ -12,9 +12,9 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: "#f7eff9",
     icons: [
       {
-        src: "/mochi/mochi-main.png",
-        sizes: "512x512",
-        type: "image/png",
+        src: "/mochi/mochi-main.webp",
+        sizes: "860x646",
+        type: "image/webp",
       },
     ],
   };

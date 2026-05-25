@@ -143,6 +143,27 @@ textarea {
   animation: lumi-fade-in 1s ease-out both;
 }
 
+.thinking-text-wave {
+  display: inline-block;
+  color: #716a7e;
+  background: linear-gradient(
+    100deg,
+    #716a7e 0%,
+    #716a7e 33%,
+    #d7d4dc 44%,
+    #ffffff 50%,
+    #c9c5d0 56%,
+    #716a7e 68%,
+    #716a7e 100%
+  );
+  background-size: 300% 100%;
+  background-position: 140% 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-text-wave 2.15s linear infinite;
+}
+
 @keyframes lumi-wave {
   0%,
   100% {
@@ -150,6 +171,15 @@ textarea {
   }
   50% {
     transform: scaleY(1);
+  }
+}
+
+@keyframes thinking-text-wave {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -140% 0;
   }
 }
 
@@ -163,7 +193,8 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lumi-fade-in {
+  .lumi-fade-in,
+  .thinking-text-wave {
     animation-duration: 1ms;
   }
 }

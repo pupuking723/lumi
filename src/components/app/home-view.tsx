@@ -13,25 +13,25 @@ const featureCards = [
   {
     title: "Meet Mochi",
     body: "Your sassy style bestie, always ready to judge and guide.",
-    image: "/landing/mochi-feature-1.png",
+    image: "/landing/mochi-feature-1.webp",
     crop: "object-[50%_26%]",
   },
   {
     title: "Sharp Fashion Advice",
     body: "Spots the flaws, gives honest, witty outfit tips.",
-    image: "/landing/mochi-feature-2.png",
+    image: "/landing/mochi-feature-2.webp",
     crop: "object-[50%_28%]",
   },
   {
     title: "Remembers You",
     body: "Keeps track of your style, preferences, and past choices.",
-    image: "/landing/mochi-feature-3.png",
+    image: "/landing/mochi-feature-3.webp",
     crop: "object-[50%_22%]",
   },
   {
     title: "More Than Fashion",
     body: "Beyond outfits: emotional support, style guidance, and tiny daily decisions.",
-    image: "/landing/mochi-feature-4.png",
+    image: "/landing/mochi-feature-4.webp",
     crop: "object-[50%_32%]",
   },
 ] as const;
@@ -50,7 +50,7 @@ function HeroSection() {
   return (
     <section className="relative isolate overflow-hidden border-b border-white/70">
       <Image
-        src="/landing/mochi-hero.png"
+        src="/landing/mochi-hero.webp"
         alt="Mochi in a dreamy fashion closet"
         fill
         priority

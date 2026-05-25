@@ -87,7 +87,7 @@ export const seedLooks: LookCard[] = [
   {
     id: "look-soft-icon",
     title: "Soft Icon Errands",
-    imageUrl: "/mochi/mochi-variants.png",
+    imageUrl: "/mochi/mochi-variants.webp",
     visibility: "private",
     analysis: demoAnalysis,
     tags: ["lilac", "gold", "main character"],
