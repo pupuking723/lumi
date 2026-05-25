@@ -84,6 +84,7 @@ export function ChatView() {
   const liveSessionGenerationRef = useRef(0);
   const liveCaptureGenerationRef = useRef(0);
   const liveSentMediaIdsRef = useRef<Set<string>>(new Set());
+  const liveAssistantMessageIdRef = useRef<string | null>(null);
   const startVoiceSessionRef = useRef<(resetReconnect?: boolean) => Promise<void>>(
     async () => undefined,
   );
@@ -154,6 +155,98 @@ export function ChatView() {
     },
     [conversationId, messagesKey, queryClient],
   );
+
+  const appendLiveAssistantDelta = useCallback(
+    (delta: string) => {
+      if (!conversationId || !delta.trim()) return;
+
+      queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) => {
+        let messageId = liveAssistantMessageIdRef.current;
+        if (!messageId || !current.some((message) => message.id === messageId)) {
+          messageId = `msg-live-stream-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          liveAssistantMessageIdRef.current = messageId;
+          return [
+            ...current,
+            {
+              id: messageId,
+              conversationId,
+              role: "mochi",
+              kind: "text",
+              content: delta,
+              status: "sending",
+              createdAt: new Date().toISOString(),
+            },
+          ];
+        }
+
+        return current.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                content: appendLiveTranscript(message.content, delta),
+                status: "sending",
+              }
+            : message,
+        );
+      });
+    },
+    [conversationId, messagesKey, queryClient],
+  );
+
+  const finalizeLiveAssistantMessage = useCallback(
+    (content: string) => {
+      if (!conversationId || !content.trim()) return;
+
+      const messageId = liveAssistantMessageIdRef.current;
+      if (!messageId) {
+        appendLiveMessage(content);
+        return;
+      }
+
+      liveAssistantMessageIdRef.current = null;
+      queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) => {
+        let replaced = false;
+        const next = current.map((message) => {
+          if (message.id !== messageId) return message;
+          replaced = true;
+          return {
+            ...message,
+            content,
+            status: "sent" as const,
+          };
+        });
+
+        if (!replaced) {
+          next.push({
+            id: messageId,
+            conversationId,
+            role: "mochi",
+            kind: "text",
+            content,
+            status: "sent",
+            createdAt: new Date().toISOString(),
+          });
+        }
+
+        return next;
+      });
+    },
+    [appendLiveMessage, conversationId, messagesKey, queryClient],
+  );
+
+  const clearLiveAssistantDraft = useCallback(() => {
+    const messageId = liveAssistantMessageIdRef.current;
+    liveAssistantMessageIdRef.current = null;
+    if (!messageId) return;
+
+    queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
+      current
+        .filter((message) => message.id !== messageId || message.content.trim())
+        .map((message) =>
+          message.id === messageId ? { ...message, status: "sent" } : message,
+        ),
+    );
+  }, [messagesKey, queryClient]);
 
   const stopLivePlayback = useCallback(() => {
     livePlaybackGenerationRef.current += 1;
@@ -258,6 +351,7 @@ export function ChatView() {
     void captureAudioContextRef.current?.close().catch(() => undefined);
     captureAudioContextRef.current = null;
     stopLivePlayback();
+    clearLiveAssistantDraft();
 
     if (audioContextRef.current) {
       void audioContextRef.current.close().catch(() => undefined);
@@ -269,7 +363,7 @@ export function ChatView() {
       setVoiceStatus("idle");
       setVoiceLevels(DEFAULT_VOICE_LEVELS);
     }
-  }, [stopLivePlayback]);
+  }, [clearLiveAssistantDraft, stopLivePlayback]);
 
   const sendLiveMediaAttachment = useCallback((attachment: PendingAttachment) => {
     const socket = liveSocketRef.current;
@@ -517,6 +611,12 @@ export function ChatView() {
           setVoiceStatus("listening");
           return;
         }
+        if (eventType === "live_interrupted") {
+          clearLiveAssistantDraft();
+          stopLivePlayback();
+          setVoiceStatus("listening");
+          return;
+        }
 
         const audio =
           parsed.audio ??
@@ -531,8 +631,16 @@ export function ChatView() {
         if (text) {
           setVoiceStatus("responding");
           if (eventType === "live_transcript" && parsed.role === "user") return;
+          if (eventType === "live_transcript" && parsed.role === "assistant") {
+            appendLiveAssistantDelta(text);
+            return;
+          }
           if (eventType === "message") {
-            appendLiveMessage(text, parsed.role === "user" ? "user" : "mochi");
+            if (parsed.role === "assistant") {
+              finalizeLiveAssistantMessage(text);
+            } else {
+              appendLiveMessage(text, parsed.role === "user" ? "user" : "mochi");
+            }
             return;
           }
           appendLiveMessage(text);
@@ -569,12 +677,16 @@ export function ChatView() {
     }
   }, [
     appendLiveMessage,
+    appendLiveAssistantDelta,
     attachments,
+    clearLiveAssistantDraft,
     ensurePlaybackContext,
+    finalizeLiveAssistantMessage,
     playLiveAudio,
     sendLiveMediaAttachment,
     sessionId,
     startLiveCapture,
+    stopLivePlayback,
     stopVoiceSession,
   ]);
 
@@ -1221,6 +1333,14 @@ function base64PCMToFloat32(value: string, mimeType: string): Float32Array {
   }
 
   return samples;
+}
+
+function appendLiveTranscript(current: string, next: string): string {
+  const text = next.trim();
+  if (!text) return current;
+  if (!current) return text;
+  if (/^[，。！？,.!?;；:：]/.test(text)) return `${current}${text}`;
+  return `${current}${/[\s\n]$/.test(current) ? "" : " "}${text}`;
 }
 
 function PromptSuggestions({
