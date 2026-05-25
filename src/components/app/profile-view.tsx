@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
 import {
   Bell,
   Brain,
@@ -14,6 +15,7 @@ import {
 import { AppChrome } from "./app-chrome";
 import { MochiPortrait } from "./mochi-portrait";
 import { Pill } from "@/components/ui/pill";
+import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { apiClient } from "@/lib/api/client";
 
 const profileItems = [
@@ -43,7 +45,7 @@ const profileItems = [
   },
   {
     label: "Memory management",
-    description: "Review, update, or clear what mochi remembers",
+    description: "Review, update, or clear what Mochi remembers",
     href: "/memory",
     icon: Brain,
   },
@@ -66,11 +68,13 @@ export function ProfileView({ settings = false }: { settings?: boolean }) {
             </h1>
             <p className="mt-3 text-sm font-semibold leading-5 text-[#716a7e]">
               Manage your account, notifications, subscription, privacy, and
-              how mochi remembers you.
+              how Mochi remembers you.
             </p>
           </div>
           <MochiPortrait variant="variants" className="min-h-[170px]" />
         </section>
+
+        <GoogleAccountPanel />
 
         <section className="rounded-[28px] border border-white/70 bg-white/70 p-2">
           {profileItems.map((item) => {
@@ -131,5 +135,37 @@ export function ProfileView({ settings = false }: { settings?: boolean }) {
         </section>
       </div>
     </AppChrome>
+  );
+}
+
+function GoogleAccountPanel() {
+  const { data: session, status } = useSession();
+  const user = status === "authenticated" ? session?.user : undefined;
+  const signedIn = Boolean(user);
+
+  return (
+    <section className="rounded-[28px] border border-white/70 bg-white/70 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <Pill tone={signedIn ? "emerald" : "gold"}>
+            {signedIn ? "Google connected" : "Google login"}
+          </Pill>
+          <h2 className="mt-3 text-lg font-extrabold text-[#242235]">
+            {signedIn ? "Signed in with Google" : "Connect your Google account"}
+          </h2>
+          <p className="mt-1 text-sm font-bold leading-6 text-[#716a7e]">
+            {signedIn
+              ? user?.email
+              : "Use the same Google OAuth flow as ShortArt for account access."}
+          </p>
+        </div>
+        {signedIn && (
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-[#e7e4ec] text-sm font-black uppercase text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset]">
+            {user?.name?.charAt(0) ?? "M"}
+          </span>
+        )}
+      </div>
+      <GoogleAuthButton className="mt-4" />
+    </section>
   );
 }

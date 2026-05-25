@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bookmark,
   Camera,
@@ -14,6 +15,7 @@ import { AppChrome } from "./app-chrome";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/pill";
 import { apiClient } from "@/lib/api/client";
+import type { UserProfile } from "@/types/lumi";
 
 const stateKeywords = ["soft icon", "date-ready", "color curious", "low effort"];
 const savedSuggestions = [
@@ -40,13 +42,15 @@ export function MemoryView() {
         <section className="rounded-[30px] border border-white/70 bg-white/72 p-4 soft-stitch">
           <Pill tone="emerald">Memory layer</Pill>
           <h1 className="mt-3 font-display text-4xl font-semibold leading-none text-[#343145]">
-            mochi remembers you
+            Mochi remembers you
           </h1>
           <p className="mt-3 text-sm font-semibold leading-6 text-[#716a7e]">
             Your repeated style notes, preferences, and recent mood live here so
             the next chat does not start from zero.
           </p>
         </section>
+
+        <MemoryEditor key={me?.id ?? "empty"} profile={me} />
 
         <section className="rounded-[28px] border border-white/70 bg-white/72 p-4">
           <div className="mb-3 flex items-center gap-2">
@@ -90,7 +94,7 @@ export function MemoryView() {
             </p>
             <p className="mt-1 text-sm font-semibold leading-5 text-[#716a7e]">
               {latestLook?.analysis.mochiLine ??
-                "Snap an outfit and mochi will remember the key style notes."}
+                "Snap an outfit and Mochi will remember the key style notes."}
             </p>
           </div>
         </section>
@@ -149,10 +153,111 @@ export function MemoryView() {
 
         <Button className="w-full">
           <Sparkles size={17} aria-hidden />
-          Ask mochi to refresh my memory
+          Ask Mochi to refresh my memory
         </Button>
       </div>
     </AppChrome>
+  );
+}
+
+function MemoryEditor({ profile }: { profile?: UserProfile }) {
+  const queryClient = useQueryClient();
+  const [vibe, setVibe] = useState(profile?.styleProfile.vibe ?? "");
+  const [colors, setColors] = useState(
+    profile?.styleProfile.favoriteColors.join(", ") ?? "",
+  );
+  const [avoidNotes, setAvoidNotes] = useState(
+    profile?.styleProfile.avoidNotes.join(", ") ?? "",
+  );
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      apiClient.updateStyleProfile({
+        vibe: vibe.trim() || "soft icon",
+        favoriteColors: colors
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        avoidNotes: avoidNotes
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
+    },
+  });
+
+  return (
+    <section className="rounded-[28px] border border-white/70 bg-white/72 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-extrabold text-[#343145]">
+            Edit style memory
+          </h2>
+          <p className="mt-1 text-xs font-bold leading-5 text-[#8c7897]">
+            Mochi uses these notes to make outfit advice feel more like you.
+          </p>
+        </div>
+        {saveMutation.isSuccess && (
+          <Pill tone="mint">Saved</Pill>
+        )}
+      </div>
+      <div className="space-y-2">
+        <MemoryInput
+          label="Style summary"
+          value={vibe}
+          onChange={setVibe}
+          placeholder="soft icon, relaxed, clean"
+        />
+        <MemoryInput
+          label="Favorite colors"
+          value={colors}
+          onChange={setColors}
+          placeholder="lilac, cream, emerald"
+        />
+        <MemoryInput
+          label="Avoid"
+          value={avoidNotes}
+          onChange={setAvoidNotes}
+          placeholder="body shaming, diet talk"
+        />
+      </div>
+      <Button
+        className="mt-3 w-full"
+        disabled={saveMutation.isPending}
+        onClick={() => saveMutation.mutate()}
+      >
+        <Sparkles size={17} aria-hidden />
+        {saveMutation.isPending ? "Saving..." : "Save Mochi memory"}
+      </Button>
+    </section>
+  );
+}
+
+function MemoryInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[0.68rem] font-extrabold uppercase text-[#5f586f]">
+        {label}
+      </span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-11 w-full rounded-[18px] border border-white/78 bg-[#f6f5f7]/78 px-3 text-sm font-bold text-[#242235] outline-none placeholder:text-[#aaa2b5]"
+      />
+    </label>
   );
 }
 

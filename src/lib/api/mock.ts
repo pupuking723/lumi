@@ -1,9 +1,9 @@
 import { demoAnalysis, seedLooks } from "@/lib/data/mochi";
 import type {
   ChatMessage,
-  LiveSession,
   LookCard,
   MochiConversation,
+  OotdReview,
   ShareLink,
   UserProfile,
   VisionAnalysis,
@@ -47,7 +47,7 @@ const messagesByConversation: Record<string, ChatMessage[]> = {
       role: "mochi",
       kind: "text",
       content:
-        "Hi darling. I’m Mochi: cotton elf, color curator, and your tiny fashion witness. What are we making iconic today?",
+        "Hi, I’m Mochi. Send me the outfit, the occasion, or the tiny doubt before you leave. I’ll help with taste, proportion, color, and expression, then keep the final move wearable.",
       status: "sent",
       createdAt: now(),
     },
@@ -58,6 +58,7 @@ let looks: LookCard[] = [...seedLooks];
 
 interface MockClientOptions {
   chatProxyPath?: string;
+  uploadProxyPath?: string;
 }
 
 function mochiReply(content: string): string {
@@ -91,6 +92,28 @@ function buildAnalysis(input: AnalyzeVisionInput): VisionAnalysis {
       input.intent === "color-match"
         ? "The palette wants one confident anchor. Keep the base soft, then let emerald or denim do the talking."
         : demoAnalysis.summary,
+    createdAt: now(),
+  };
+}
+
+function buildOotdReview(input: {
+  media_id: string;
+  session_id: string;
+  occasion?: string;
+  note?: string;
+}): OotdReview {
+  return {
+    id: id("ootd"),
+    session_id: input.session_id,
+    media_id: input.media_id,
+    overall_judgement: "Wear it, but sharpen one detail.",
+    style_label: input.occasion ?? "soft icon",
+    highlight: "The palette already feels intentional and easy to read.",
+    main_issue: "The look needs one cleaner anchor so the softness does not blur.",
+    suggestion:
+      input.note?.trim() ||
+      "Add a sharper bag, glasses, or shoe shape to give the outfit a final point.",
+    mochi_line: "Good mood. Great base. Give it one tiny wink of structure.",
     createdAt: now(),
   };
 }
@@ -153,6 +176,31 @@ export function createMockClient(options: MockClientOptions = {}): LumiApiClient
       await delay(180);
       return messagesByConversation[conversationId] ?? [];
     },
+    async uploadAttachment(file) {
+      if (options.uploadProxyPath) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch(options.uploadProxyPath, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `Upload failed with ${response.status}`);
+        }
+
+        return response.json();
+      }
+
+      await delay(320);
+      return {
+        media_id: id("media"),
+        fileName: file.name,
+        mimeType: file.type,
+      };
+    },
     async sendMessage(conversationId, input) {
       if (options.chatProxyPath) {
         const result = await sendMessageThroughChatProxy(
@@ -173,6 +221,7 @@ export function createMockClient(options: MockClientOptions = {}): LumiApiClient
         kind: input.imageUrl ? "image" : "text",
         content: input.content || "Can you read this look?",
         imageUrl: input.imageUrl,
+        attachments: input.attachments,
         status: "sent",
         createdAt,
       };
@@ -189,20 +238,13 @@ export function createMockClient(options: MockClientOptions = {}): LumiApiClient
       rememberChatResult(conversationId, result);
       return result;
     },
-    async createLiveSession() {
-      await delay(520);
-      const session: LiveSession = {
-        id: id("live"),
-        agentId: "mochi",
-        status: "connecting",
-        startedAt: now(),
-        realtimeToken: "mock-realtime-token",
-      };
-      return session;
-    },
     async analyzeVision(input) {
       await delay(900);
       return buildAnalysis(input);
+    },
+    async submitOotdReview(input) {
+      await delay(900);
+      return buildOotdReview(input);
     },
     async listLooks() {
       await delay(220);

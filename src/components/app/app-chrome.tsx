@@ -12,6 +12,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 
 const navItems = [
   { href: "/chat", label: "Chat", icon: MessageCircle },
@@ -22,8 +23,7 @@ const navItems = [
 const titles: Record<string, string> = {
   "/": "Today’s mirror",
   "/chat": "Chat",
-  "/memory": "mochi remembers you",
-  "/live": "Live styling",
+  "/memory": "Mochi remembers you",
   "/camera": "Snap check",
   "/looks": "Saved looks",
   "/profile": "Me",
@@ -64,12 +64,15 @@ export function AppChrome({
           >
             Lumi
           </Link>
-          <p className="mt-2 text-sm font-extrabold text-[#7a728a]">mochi</p>
+          <p className="mt-2 text-sm font-extrabold text-[#7a728a]">Mochi</p>
           <nav className="mt-8 flex flex-col gap-1.5">
             {navItems.map((item) => (
               <NavItem key={item.href} item={item} pathname={pathname} />
             ))}
           </nav>
+          <div className="mt-auto pt-5">
+            <GoogleAuthButton />
+          </div>
         </aside>
 
         <div
@@ -113,7 +116,7 @@ export function AppChrome({
                             </Link>
                           </SheetClose>
                           <p className="mt-2 text-sm font-extrabold text-[#7a728a]">
-                            mochi
+                            Mochi
                           </p>
                         </div>
                         <SheetClose asChild>
@@ -143,9 +146,7 @@ export function AppChrome({
                     Lumi
                   </Link>
                 </div>
-                <div className="rounded-full border border-white/78 bg-white/56 px-4 py-2 text-xs font-extrabold text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.95)_inset] backdrop-blur-xl">
-                  mochi
-                </div>
+                <GoogleAuthButton compact />
               </div>
               <p className="mt-1 text-sm font-extrabold text-[#5f586f] md:mt-0">
                 {title}

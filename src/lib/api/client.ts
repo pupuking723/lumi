@@ -1,10 +1,11 @@
 import type {
   ChatMessage,
-  LiveSession,
   LookCard,
   MochiConversation,
+  OotdReview,
   SendMessageInput,
   SendMessageResult,
+  UploadedAttachment,
   UserProfile,
   VisionAnalysis,
   ShareLink,
@@ -26,6 +27,13 @@ export interface CreateLookInput {
   visibility?: "private" | "public";
 }
 
+export interface SubmitOotdReviewInput {
+  media_id: string;
+  session_id: string;
+  occasion?: string;
+  note?: string;
+}
+
 export interface LumiApiClient {
   getMe: () => Promise<UserProfile>;
   updateStyleProfile: (
@@ -34,12 +42,13 @@ export interface LumiApiClient {
   listConversations: () => Promise<MochiConversation[]>;
   createConversation: () => Promise<MochiConversation>;
   listMessages: (conversationId: string) => Promise<ChatMessage[]>;
+  uploadAttachment: (file: File) => Promise<UploadedAttachment>;
   sendMessage: (
     conversationId: string,
     input: SendMessageInput,
   ) => Promise<SendMessageResult>;
-  createLiveSession: () => Promise<LiveSession>;
   analyzeVision: (input: AnalyzeVisionInput) => Promise<VisionAnalysis>;
+  submitOotdReview: (input: SubmitOotdReviewInput) => Promise<OotdReview>;
   listLooks: () => Promise<LookCard[]>;
   createLook: (input: CreateLookInput) => Promise<LookCard>;
   createShareLink: (lookId: string) => Promise<ShareLink>;
@@ -48,6 +57,7 @@ export interface LumiApiClient {
 export function createLumiApiClient(): LumiApiClient {
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
   const chatProxyPath = process.env.NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH;
+  const uploadProxyPath = process.env.NEXT_PUBLIC_LUMI_UPLOAD_PROXY_PATH;
   return baseUrl
     ? createHttpClient(baseUrl)
     : createMockClient({
@@ -55,6 +65,10 @@ export function createLumiApiClient(): LumiApiClient {
           chatProxyPath === "off"
             ? undefined
             : (chatProxyPath ?? "/api/chat/completions"),
+        uploadProxyPath:
+          uploadProxyPath === "off"
+            ? undefined
+            : (uploadProxyPath ?? "/api/chat/attachments/upload"),
       });
 }
 

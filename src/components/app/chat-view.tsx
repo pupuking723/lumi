@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -13,6 +14,7 @@ import {
   PhoneOff,
   SendHorizonal,
   Sparkles,
+  Square,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
@@ -21,25 +23,47 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { starterPrompts } from "@/lib/data/mochi";
-import type { ChatMessage, SendMessageInput, SendMessageResult } from "@/types/lumi";
+import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  SendMessageInput,
+  SendMessageResult,
+} from "@/types/lumi";
 
 const DEFAULT_VOICE_LEVELS = [
   0.34, 0.52, 0.42, 0.7, 0.48, 0.82, 0.56, 0.76, 0.44, 0.62, 0.38,
   0.58,
 ];
 
+type PendingAttachment = ChatAttachment & {
+  localId: string;
+  uploadStatus: "uploading" | "ready" | "failed";
+  error?: string;
+};
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 export function ChatView() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageScrollRef = useRef<HTMLElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const attachmentUrlsRef = useRef<Set<string>>(new Set());
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const voiceFrameRef = useRef<number | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [attachmentName, setAttachmentName] = useState("");
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [sessionId, setSessionId] = useState(() =>
+    typeof window === "undefined" ? "" : getOrCreateMochiSessionId(),
+  );
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
+  const [lastSendStopped, setLastSendStopped] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceError, setVoiceError] = useState("");
   const [voiceLevels, setVoiceLevels] = useState(DEFAULT_VOICE_LEVELS);
@@ -64,6 +88,12 @@ export function ChatView() {
     queryFn: () => apiClient.listMessages(conversationId as string),
   });
   const messages = messagesQuery.data ?? [];
+  const hasUploadingAttachments = attachments.some(
+    (attachment) => attachment.uploadStatus === "uploading",
+  );
+  const hasFailedAttachments = attachments.some(
+    (attachment) => attachment.uploadStatus === "failed",
+  );
   const streamingAssistant = streamingAssistantId
     ? messages.find((message) => message.id === streamingAssistantId)
     : undefined;
@@ -178,6 +208,7 @@ export function ChatView() {
               ),
           );
         },
+        abortSignal: input.abortSignal,
       }),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: messagesKey });
@@ -190,9 +221,10 @@ export function ChatView() {
         id: optimisticId,
         conversationId: conversationId as string,
         role: "user",
-        kind: input.imageUrl ? "image" : "text",
-        content: input.content || "Can you read this outfit?",
+        kind: input.attachments?.length || input.imageUrl ? "image" : "text",
+        content: input.content || "Can you review this look?",
         imageUrl: input.imageUrl,
+        attachments: input.attachments,
         status: "sent",
         createdAt: new Date().toISOString(),
       };
@@ -214,7 +246,7 @@ export function ChatView() {
         [...previousMessages, optimisticMessage, optimisticAssistantMessage],
       );
       setDraft("");
-      setAttachmentName("");
+      setAttachments([]);
       return { optimisticId, optimisticAssistantId };
     },
     onSuccess: (result, _variables, context) => {
@@ -249,7 +281,7 @@ export function ChatView() {
       });
       setLastPayload(null);
     },
-    onError: (_error, _variables, context) => {
+    onError: (error, variables, context) => {
       if (!context) return;
       if (streamingAssistantIdRef.current === context.optimisticAssistantId) {
         streamingAssistantIdRef.current = null;
@@ -257,6 +289,29 @@ export function ChatView() {
       setStreamingAssistantId((current) =>
         current === context.optimisticAssistantId ? null : current,
       );
+
+      if (variables.abortSignal?.aborted || isAbortError(error)) {
+        setLastSendStopped(true);
+        queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
+          current
+            .map((message) =>
+              message.id === context.optimisticId
+                ? { ...message, status: "sent" as const }
+                : message,
+            )
+            .filter(
+              (message) =>
+                message.id !== context.optimisticAssistantId ||
+                message.content.trim(),
+            )
+            .map((message) =>
+              message.id === context.optimisticAssistantId
+                ? { ...message, status: "sent" as const }
+                : message,
+            ),
+        );
+        return;
+      }
 
       queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
         current
@@ -267,6 +322,9 @@ export function ChatView() {
               : message,
           ),
       );
+    },
+    onSettled: () => {
+      abortControllerRef.current = null;
     },
   });
   const showPendingIndicator =
@@ -285,20 +343,143 @@ export function ChatView() {
     return () => stopVoiceSession(false);
   }, [stopVoiceSession]);
 
+  useEffect(() => {
+    const urls = attachmentUrlsRef.current;
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+    };
+  }, []);
+
+  const removeAttachment = (localId: string) => {
+    setAttachments((current) => {
+      const attachment = current.find((item) => item.localId === localId);
+      if (attachment?.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+        attachmentUrlsRef.current.delete(attachment.previewUrl);
+      }
+
+      return current.filter((item) => item.localId !== localId);
+    });
+  };
+
+  const onFilesSelected = (files: FileList | null) => {
+    if (!files?.length) return;
+
+    Array.from(files)
+      .filter((file) => file.type.startsWith("image/"))
+      .slice(0, 4)
+      .forEach((file) => {
+        const localId =
+          globalThis.crypto?.randomUUID?.() ??
+          `attachment-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const previewUrl = URL.createObjectURL(file);
+        attachmentUrlsRef.current.add(previewUrl);
+
+        const pendingAttachment: PendingAttachment = {
+          localId,
+          media_id: "",
+          caption: draft.trim() || "Outfit image for Mochi to review",
+          source: "chat",
+          role: "user",
+          previewUrl,
+          fileName: file.name,
+          mimeType: file.type,
+          uploadStatus: "uploading",
+        };
+
+        setAttachments((current) => [...current, pendingAttachment]);
+
+        void apiClient
+          .uploadAttachment(file)
+          .then((uploaded) => {
+            setAttachments((current) =>
+              current.map((attachment) =>
+                attachment.localId === localId
+                  ? {
+                      ...attachment,
+                      media_id: uploaded.media_id,
+                      fileName: uploaded.fileName ?? attachment.fileName,
+                      mimeType: uploaded.mimeType ?? attachment.mimeType,
+                      uploadStatus: "ready",
+                    }
+                  : attachment,
+              ),
+            );
+          })
+          .catch((error: unknown) => {
+            setAttachments((current) =>
+              current.map((attachment) =>
+                attachment.localId === localId
+                  ? {
+                      ...attachment,
+                      uploadStatus: "failed",
+                      error:
+                        error instanceof Error
+                          ? error.message
+                          : "Upload failed. Remove it and try again.",
+                    }
+                  : attachment,
+              ),
+            );
+          });
+      });
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const stopGeneration = () => {
+    abortControllerRef.current?.abort();
+  };
+
   const submit = (payload?: SendMessageInput) => {
     if (!conversationId) return;
-    const content = payload?.content ?? draft.trim();
-    const imageUrl =
-      payload?.imageUrl ??
-      (attachmentName ? `attachment://${encodeURIComponent(attachmentName)}` : undefined);
+    if (!payload && (hasUploadingAttachments || hasFailedAttachments)) return;
 
-    if (!content && !imageUrl) return;
-    const nextPayload = {
-      content: content || "Can you read this outfit?",
+    const content = payload?.content ?? draft.trim();
+    const readyAttachments =
+      payload?.attachments ??
+      attachments
+        .filter((attachment) => attachment.uploadStatus === "ready")
+        .map((attachment) => ({
+          media_id: attachment.media_id,
+          caption: content || attachment.caption,
+          source: attachment.source,
+          role: attachment.role,
+          previewUrl: attachment.previewUrl,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+        }));
+    const imageUrl = payload?.imageUrl ?? readyAttachments[0]?.previewUrl;
+
+    if (!content && !readyAttachments.length && !imageUrl) return;
+
+    const currentSessionId = sessionId || getOrCreateMochiSessionId();
+    if (!sessionId) setSessionId(currentSessionId);
+
+    const retryPayload: SendMessageInput = {
+      content: content || "Can you review this look?",
       imageUrl,
+      attachments: readyAttachments,
+      sessionId: currentSessionId,
+      scenario: readyAttachments.length ? "image_review" : "text_chat",
+      inputContext: {
+        source: "chat",
+        mode: readyAttachments.length && content ? "multimodal" : readyAttachments.length ? "image" : "text",
+        refers_to_media_id: readyAttachments[0]?.media_id,
+      },
     };
-    setLastPayload(nextPayload);
-    sendMutation.mutate(nextPayload);
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    setLastSendStopped(false);
+    sendMutation.reset();
+    setLastPayload(retryPayload);
+    sendMutation.mutate({
+      ...retryPayload,
+      abortSignal: abortController.signal,
+    });
   };
 
   const onSubmit = (event: FormEvent) => {
@@ -317,6 +498,7 @@ export function ChatView() {
           className="scrollbar-pearl min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-3 pr-1 [-webkit-overflow-scrolling:touch]"
         >
           <div className="flex flex-col gap-3">
+            {messages.length === 0 && <WelcomeMessage />}
             {messages.map((message) => (
               <MessageItem key={message.id} message={message} />
             ))}
@@ -334,9 +516,16 @@ export function ChatView() {
                   <span className="size-1 rounded-full bg-[#8b8497]" />
                   <span className="size-1 rounded-full bg-[#8b8497]" />
                 </span>
+                <button
+                  type="button"
+                  onClick={stopGeneration}
+                  className="ml-3 underline"
+                >
+                  Stop
+                </button>
               </div>
             )}
-            {sendMutation.isError && (
+            {sendMutation.isError && !lastSendStopped && (
               <div className="lumi-fade-in rounded-[22px] border border-[#ead1d8] bg-[#fff3f5]/86 p-3 text-sm font-bold text-[#9c4a61] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] backdrop-blur-xl">
                 The thread snagged.{" "}
                 <button
@@ -385,14 +574,54 @@ export function ChatView() {
                 </button>
               ) : (
                 <>
-                  {attachmentName && (
-                    <div className="mb-2 flex items-center justify-between rounded-[22px] border border-white/72 bg-[#edeaf1]/72 px-3 py-2 text-xs font-extrabold text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.78)_inset]">
-                      <span className="truncate">
-                        Attached: {attachmentName}
-                      </span>
-                      <button type="button" onClick={() => setAttachmentName("")}>
-                        remove
-                      </button>
+                  {attachments.length > 0 && (
+                    <div className="mb-2 space-y-2">
+                      {attachments.map((attachment) => (
+                        <div
+                          key={attachment.localId}
+                          className="flex items-center justify-between gap-3 rounded-[22px] border border-white/72 bg-[#edeaf1]/72 px-2 py-2 text-xs font-extrabold text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.78)_inset]"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            {attachment.previewUrl && (
+                              <span className="relative size-10 shrink-0 overflow-hidden rounded-[14px] bg-white/50">
+                                <Image
+                                  src={attachment.previewUrl}
+                                  alt=""
+                                  fill
+                                  sizes="40px"
+                                  className="object-cover"
+                                  unoptimized
+                                />
+                              </span>
+                            )}
+                            <span className="min-w-0">
+                              <span className="block truncate">
+                                {attachment.fileName ?? "Outfit image"}
+                              </span>
+                              <span
+                                className={cn(
+                                  "block text-[0.68rem]",
+                                  attachment.uploadStatus === "failed"
+                                    ? "text-[#9c4a61]"
+                                    : "text-[#8c7897]",
+                                )}
+                              >
+                                {attachment.uploadStatus === "uploading"
+                                  ? "Uploading..."
+                                  : attachment.uploadStatus === "ready"
+                                    ? "Ready for Mochi"
+                                    : "Upload failed"}
+                              </span>
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeAttachment(attachment.localId)}
+                          >
+                            remove
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                   <div className="flex items-end gap-2">
@@ -400,10 +629,10 @@ export function ChatView() {
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
+                      capture="environment"
+                      multiple
                       className="hidden"
-                      onChange={(event) =>
-                        setAttachmentName(event.target.files?.[0]?.name ?? "")
-                      }
+                      onChange={(event) => onFilesSelected(event.target.files)}
                     />
                     <Button
                       aria-label="Attach outfit image"
@@ -434,17 +663,28 @@ export function ChatView() {
                       <Mic size={19} aria-hidden />
                     </Button>
                     <Button
-                      aria-label="Send message"
-                      type="submit"
+                      aria-label={
+                        sendMutation.isPending ? "Stop generating" : "Send message"
+                      }
+                      type={sendMutation.isPending ? "button" : "submit"}
                       size="icon"
+                      onClick={
+                        sendMutation.isPending ? stopGeneration : undefined
+                      }
                       disabled={
-                        !conversationId ||
-                        sendMutation.isPending ||
-                        (!draft.trim() && !attachmentName)
+                        !sendMutation.isPending &&
+                        (!conversationId ||
+                          hasUploadingAttachments ||
+                          hasFailedAttachments ||
+                          (!draft.trim() && !attachments.length))
                       }
                       className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
                     >
-                      <SendHorizonal size={19} aria-hidden />
+                      {sendMutation.isPending ? (
+                        <Square size={17} aria-hidden />
+                      ) : (
+                        <SendHorizonal size={19} aria-hidden />
+                      )}
                     </Button>
                   </div>
                   {voiceError && (
@@ -487,7 +727,7 @@ function PromptSuggestions({
 
   return (
     <div className="lumi-fade-in flex flex-wrap gap-2 px-1 pt-1">
-      {starterPrompts.slice(0, 3).map((prompt) => (
+      {starterPrompts.slice(0, 6).map((prompt) => (
         <button
           key={prompt}
           type="button"
@@ -497,6 +737,18 @@ function PromptSuggestions({
           {prompt}
         </button>
       ))}
+    </div>
+  );
+}
+
+function WelcomeMessage() {
+  return (
+    <div className="max-w-full px-1 py-2 text-[#343145]">
+      <div className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase text-[#716a7e]">
+        <Sparkles size={13} className="text-[#b99955]" aria-hidden />
+        Mochi
+      </div>
+      <MarkdownMessage content="Hi, I’m Mochi. Send me the outfit, the occasion, or the tiny doubt before you leave. I’ll help with taste, proportion, color, and expression, without pretending to be your doctor, therapist, lawyer, or life oracle." />
     </div>
   );
 }
@@ -545,8 +797,23 @@ function MessageItem({ message }: { message: ChatMessage }) {
         )}
       >
         {message.imageUrl && (
-          <div className="mb-2 rounded-[16px] bg-white/18 px-3 py-2 text-xs">
-            Outfit image attached
+          <div className="relative mb-2 aspect-[4/3] overflow-hidden rounded-[18px] bg-white/18">
+            {message.imageUrl.startsWith("blob:") ||
+            message.imageUrl.startsWith("data:") ||
+            message.imageUrl.startsWith("http") ? (
+              <Image
+                src={message.imageUrl}
+                alt="Uploaded outfit preview"
+                fill
+                sizes="(max-width: 768px) 72vw, 320px"
+                className="object-cover"
+                unoptimized
+              />
+            ) : (
+              <div className="flex h-full items-center px-3 py-2 text-xs">
+                Outfit image attached
+              </div>
+            )}
           </div>
         )}
         {message.content}

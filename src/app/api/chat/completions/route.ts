@@ -55,6 +55,23 @@ export async function POST(request: Request) {
         model,
         messages: toGoClawMessages(body.history, message),
         stream: true,
+        session_id: message.sessionId ?? body.conversationId,
+        scenario: message.scenario ?? (message.attachments?.length ? "image_review" : "text_chat"),
+        input_context:
+          message.inputContext ??
+          (message.attachments?.[0]?.media_id
+            ? {
+                source: "chat",
+                mode: "multimodal",
+                refers_to_media_id: message.attachments[0].media_id,
+              }
+            : { source: "chat", mode: "text" }),
+        attachments: message.attachments?.map((attachment) => ({
+          media_id: attachment.media_id,
+          caption: attachment.caption,
+          source: attachment.source,
+          role: attachment.role,
+        })),
       }),
     });
   } catch (error) {

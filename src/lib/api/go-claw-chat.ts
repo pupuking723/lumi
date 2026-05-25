@@ -96,12 +96,22 @@ function getSseDataLines(rawEvent: string) {
 export async function collectGoClawEventStream(
   stream: ReadableStream<Uint8Array>,
   onAssistantDelta?: (delta: string) => void,
+  signal?: AbortSignal,
 ): Promise<GoClawStreamResult> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
   let upstreamId: string | undefined;
+  let aborted = false;
+
+  const abortStream = () => {
+    aborted = true;
+    void reader.cancel().catch(() => undefined);
+  };
+
+  if (signal?.aborted) abortStream();
+  signal?.addEventListener("abort", abortStream, { once: true });
 
   const handleEvent = (rawEvent: string) => {
     const dataLines = getSseDataLines(rawEvent);
@@ -128,6 +138,10 @@ export async function collectGoClawEventStream(
   };
 
   while (true) {
+    if (aborted) {
+      throw new DOMException("The chat stream was aborted.", "AbortError");
+    }
+
     const { done, value } = await reader.read();
 
     if (done) break;
@@ -154,6 +168,7 @@ export async function collectGoClawEventStream(
     handleEvent(buffer);
   }
 
+  signal?.removeEventListener("abort", abortStream);
   return { content, upstreamId };
 }
 
@@ -173,6 +188,7 @@ function makeChatResult(
       kind: input.imageUrl ? "image" : "text",
       content: input.content || "Can you read this outfit?",
       imageUrl: input.imageUrl,
+      attachments: input.attachments,
       status: "sent",
       createdAt,
     },
@@ -195,6 +211,7 @@ export async function sendMessageThroughChatProxy(
 ): Promise<SendMessageResult> {
   const response = await fetch(chatProxyPath, {
     method: "POST",
+    signal: input.abortSignal,
     headers: {
       Accept: "text/event-stream",
       "Content-Type": "application/json",
@@ -204,6 +221,10 @@ export async function sendMessageThroughChatProxy(
       message: {
         content: input.content,
         imageUrl: input.imageUrl,
+        attachments: input.attachments,
+        sessionId: input.sessionId,
+        scenario: input.scenario,
+        inputContext: input.inputContext,
       },
       history: input.history ?? [],
     }),
@@ -223,6 +244,7 @@ export async function sendMessageThroughChatProxy(
     const result = await collectGoClawEventStream(
       response.body,
       input.onAssistantDelta,
+      input.abortSignal,
     );
 
     return makeChatResult(

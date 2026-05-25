@@ -1,4 +1,9 @@
-import type { AnalyzeVisionInput, CreateLookInput, LumiApiClient } from "./client";
+import type {
+  AnalyzeVisionInput,
+  CreateLookInput,
+  LumiApiClient,
+  SubmitOotdReviewInput,
+} from "./client";
 
 async function request<T>(
   baseUrl: string,
@@ -38,18 +43,33 @@ export function createHttpClient(baseUrl: string): LumiApiClient {
       }),
     listMessages: (conversationId) =>
       request(root, `/conversations/${conversationId}/messages`),
+    async uploadAttachment(file) {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${root}/v1/chat/attachments/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Lumi upload ${response.status}: ${response.statusText}`);
+      }
+
+      return response.json();
+    },
     sendMessage: (conversationId, input) =>
       request(root, `/conversations/${conversationId}/messages`, {
         method: "POST",
         body: JSON.stringify(input),
       }),
-    createLiveSession: () =>
-      request(root, "/live/sessions", {
-        method: "POST",
-        body: JSON.stringify({ agentId: "mochi" }),
-      }),
     analyzeVision: (input: AnalyzeVisionInput) =>
       request(root, "/vision/analyses", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    submitOotdReview: (input: SubmitOotdReviewInput) =>
+      request(root, "/v1/closy/ootd/reviews", {
         method: "POST",
         body: JSON.stringify(input),
       }),

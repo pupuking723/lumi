@@ -8,16 +8,6 @@ export type ChatRole = "user" | "mochi" | "system";
 
 export type MessageStatus = "sending" | "sent" | "failed";
 
-export type LiveSessionStatus =
-  | "idle"
-  | "permission"
-  | "connecting"
-  | "listening"
-  | "responding"
-  | "reconnecting"
-  | "ended"
-  | "error";
-
 export type LookVisibility = "private" | "public";
 
 export interface UserProfile {
@@ -50,13 +40,50 @@ export interface ChatMessage {
   kind: "text" | "image" | "analysis";
   content: string;
   imageUrl?: string;
+  attachments?: ChatAttachment[];
   status: MessageStatus;
   createdAt: string;
+}
+
+export type ChatScenario =
+  | "text_chat"
+  | "image_review"
+  | "ootd_review"
+  | "live_voice"
+  | "follow_up";
+
+export interface ChatInputContext {
+  source: "chat" | "camera" | "ootd" | "live";
+  mode: "text" | "image" | "voice" | "multimodal";
+  voice_transcript?: string;
+  refers_to_media_id?: string;
+}
+
+export interface ChatAttachment {
+  media_id: string;
+  caption?: string;
+  source: "chat" | "camera" | "ootd" | "live";
+  role: "user";
+  previewUrl?: string;
+  fileName?: string;
+  mimeType?: string;
+}
+
+export interface UploadedAttachment {
+  media_id: string;
+  url?: string;
+  fileName?: string;
+  mimeType?: string;
 }
 
 export interface SendMessageInput {
   content: string;
   imageUrl?: string;
+  attachments?: ChatAttachment[];
+  sessionId?: string;
+  scenario?: ChatScenario;
+  inputContext?: ChatInputContext;
+  abortSignal?: AbortSignal;
   history?: ChatMessage[];
   onAssistantDelta?: (delta: string) => void;
 }
@@ -64,14 +91,6 @@ export interface SendMessageInput {
 export interface SendMessageResult {
   userMessage: ChatMessage;
   assistantMessage: ChatMessage;
-}
-
-export interface LiveSession {
-  id: string;
-  agentId: "mochi";
-  status: LiveSessionStatus;
-  startedAt: string;
-  realtimeToken?: string;
 }
 
 export interface VisionAnalysis {
@@ -83,6 +102,19 @@ export interface VisionAnalysis {
   strengths: string[];
   suggestions: string[];
   mochiLine: string;
+  createdAt: string;
+}
+
+export interface OotdReview {
+  id: string;
+  session_id: string;
+  media_id: string;
+  overall_judgement: string;
+  style_label?: string;
+  highlight: string;
+  main_issue: string;
+  suggestion: string;
+  mochi_line: string;
   createdAt: string;
 }
 

@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/ui/pill";
 import { apiClient } from "@/lib/api/client";
 import { styleIntents } from "@/lib/data/mochi";
+import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
 import { cn } from "@/lib/utils";
-import type { StyleIntent, VisionAnalysis } from "@/types/lumi";
+import type { OotdReview, StyleIntent, VisionAnalysis } from "@/types/lumi";
 
 export function CameraView() {
   const router = useRouter();
@@ -20,15 +21,40 @@ export function CameraView() {
   const [intent, setIntent] = useState<StyleIntent>("fit-check");
   const [previewUrl, setPreviewUrl] = useState("");
   const [fileName, setFileName] = useState("");
+  const [mediaId, setMediaId] = useState("");
+  const [uploadError, setUploadError] = useState("");
   const [analysis, setAnalysis] = useState<VisionAnalysis | null>(null);
 
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => apiClient.uploadAttachment(file),
+    onSuccess: (uploaded) => {
+      setMediaId(uploaded.media_id);
+      setUploadError("");
+    },
+    onError: () => {
+      setMediaId("");
+      setUploadError("Mochi could not upload that image. Try again.");
+    },
+  });
+
   const analyzeMutation = useMutation({
-    mutationFn: () =>
-      apiClient.analyzeVision({
+    mutationFn: async () => {
+      if (mediaId) {
+        const review = await apiClient.submitOotdReview({
+          media_id: mediaId,
+          session_id: getOrCreateMochiSessionId(),
+          occasion: styleIntents.find((item) => item.id === intent)?.label,
+          note: fileName,
+        });
+        return ootdReviewToAnalysis(review, intent);
+      }
+
+      return apiClient.analyzeVision({
         intent,
         imageName: fileName,
         imageUrl: previewUrl,
-      }),
+      });
+    },
     onSuccess: setAnalysis,
   });
 
@@ -50,10 +76,13 @@ export function CameraView() {
     const file = event.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
+    setMediaId("");
+    setUploadError("");
     setAnalysis(null);
     const reader = new FileReader();
     reader.onload = () => setPreviewUrl(String(reader.result));
     reader.readAsDataURL(file);
+    uploadMutation.mutate(file);
   };
 
   return (
@@ -133,12 +162,27 @@ export function CameraView() {
         <Button
           size="lg"
           className="w-full"
-          disabled={!previewUrl || analyzeMutation.isPending}
+          disabled={
+            !previewUrl ||
+            uploadMutation.isPending ||
+            Boolean(uploadError) ||
+            analyzeMutation.isPending
+          }
           onClick={() => analyzeMutation.mutate()}
         >
           <Sparkles size={18} aria-hidden />
-          {analyzeMutation.isPending ? "Mochi is looking..." : "Ask Mochi"}
+          {uploadMutation.isPending
+            ? "Uploading OOTD..."
+            : analyzeMutation.isPending
+              ? "Mochi is looking..."
+              : "Ask Mochi"}
         </Button>
+
+        {uploadError && (
+          <section className="rounded-[24px] border border-[#ffd1dc] bg-[#fff0f2] p-3 text-sm font-bold leading-6 text-[#a4445c]">
+            {uploadError}
+          </section>
+        )}
 
         {analysis && (
           <section className="rounded-[30px] border border-white/78 bg-white/78 p-4 soft-stitch">
@@ -176,4 +220,23 @@ export function CameraView() {
       </div>
     </AppChrome>
   );
+}
+
+function ootdReviewToAnalysis(
+  review: OotdReview,
+  intent: StyleIntent,
+): VisionAnalysis {
+  return {
+    id: review.id,
+    intent,
+    title: review.style_label
+      ? `${review.style_label}: ${review.overall_judgement}`
+      : review.overall_judgement,
+    summary: `${review.highlight} ${review.main_issue}`,
+    palette: review.style_label ? [review.style_label] : ["ootd"],
+    strengths: [review.highlight],
+    suggestions: [review.suggestion],
+    mochiLine: review.mochi_line,
+    createdAt: review.createdAt,
+  };
 }

@@ -43,10 +43,12 @@ export const styleIntents: Array<{
 ];
 
 export const starterPrompts = [
-  "What should I wear for a coffee date that might become a photo dump?",
-  "Make this outfit feel more main character without trying too hard.",
-  "Give me a color combo that says soft but expensive.",
-  "Can you judge my jacket choice with kindness and taste?",
+  "Does this outfit work for today?",
+  "Help me choose between A and B.",
+  "Should I buy this piece or skip it?",
+  "I want to switch up my style.",
+  "Quick check before I go out.",
+  "I feel low-energy. What can I wear that still feels like me?",
 ];
 
 export const homeActions = [
@@ -55,12 +57,6 @@ export const homeActions = [
     label: "Chat",
     detail: "Text Mochi",
     accent: "bg-[#d9c0eb]",
-  },
-  {
-    href: "/live",
-    label: "Live",
-    detail: "Voice styling",
-    accent: "bg-[#157464]",
   },
   {
     href: "/camera",
