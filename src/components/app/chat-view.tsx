@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -24,6 +24,14 @@ import { apiClient } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { starterPrompts } from "@/lib/data/mochi";
 import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
+import {
+  base64ToArrayBuffer,
+  blobToDataUrl,
+  dataUrlPayload,
+  getLiveWebSocketUrl,
+  parseLiveEvent,
+  type LiveConnectionStatus,
+} from "@/lib/live/ws-client";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -55,6 +63,15 @@ export function ChatView() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const liveSocketRef = useRef<WebSocket | null>(null);
+  const liveAudioQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const liveManualStopRef = useRef(false);
+  const liveReconnectAttemptRef = useRef(0);
+  const liveReconnectTimerRef = useRef<number | null>(null);
+  const startVoiceSessionRef = useRef<(resetReconnect?: boolean) => Promise<void>>(
+    async () => undefined,
+  );
   const voiceFrameRef = useRef<number | null>(null);
   const streamingAssistantIdRef = useRef<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -65,6 +82,7 @@ export function ChatView() {
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
   const [lastSendStopped, setLastSendStopped] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<LiveConnectionStatus>("idle");
   const [voiceError, setVoiceError] = useState("");
   const [voiceLevels, setVoiceLevels] = useState(DEFAULT_VOICE_LEVELS);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(
@@ -80,7 +98,10 @@ export function ChatView() {
   });
 
   const conversationId = conversationQuery.data?.id;
-  const messagesKey = ["messages", conversationId] as const;
+  const messagesKey = useMemo(
+    () => ["messages", conversationId] as const,
+    [conversationId],
+  );
 
   const messagesQuery = useQuery({
     queryKey: messagesKey,
@@ -99,7 +120,73 @@ export function ChatView() {
     : undefined;
   const lastMessageContent = messages.at(-1)?.content;
 
+  const appendLiveMessage = useCallback(
+    (content: string) => {
+      if (!conversationId || !content.trim()) return;
+
+      queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) => [
+        ...current,
+        {
+          id: `msg-live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          conversationId,
+          role: "mochi",
+          kind: "text",
+          content,
+          status: "sent",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    },
+    [conversationId, messagesKey, queryClient],
+  );
+
+  const playLiveAudioBuffer = useCallback(async (buffer: ArrayBuffer) => {
+    const audioContext = audioContextRef.current;
+    if (!audioContext) return;
+
+    liveAudioQueueRef.current = liveAudioQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const audioBuffer = await audioContext.decodeAudioData(buffer.slice(0));
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+
+        await new Promise<void>((resolve) => {
+          source.onended = () => resolve();
+          source.start();
+        });
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const playLiveAudio = useCallback(
+    async (base64Audio: string) => {
+      await playLiveAudioBuffer(base64ToArrayBuffer(base64Audio));
+    },
+    [playLiveAudioBuffer],
+  );
+
   const stopVoiceSession = useCallback((resetState = true) => {
+    liveManualStopRef.current = true;
+    if (liveReconnectTimerRef.current !== null) {
+      window.clearTimeout(liveReconnectTimerRef.current);
+      liveReconnectTimerRef.current = null;
+    }
+
+    if (mediaRecorderRef.current?.state !== "inactive") {
+      mediaRecorderRef.current?.stop();
+    }
+    mediaRecorderRef.current = null;
+
+    if (liveSocketRef.current?.readyState === WebSocket.OPEN) {
+      liveSocketRef.current.send(
+        JSON.stringify({ type: "done", turn_complete: true }),
+      );
+    }
+    liveSocketRef.current?.close();
+    liveSocketRef.current = null;
+
     if (voiceFrameRef.current !== null) {
       window.cancelAnimationFrame(voiceFrameRef.current);
       voiceFrameRef.current = null;
@@ -116,15 +203,22 @@ export function ChatView() {
 
     if (resetState) {
       setVoiceActive(false);
+      setVoiceStatus("idle");
       setVoiceLevels(DEFAULT_VOICE_LEVELS);
     }
   }, []);
 
-  const startVoiceSession = useCallback(async () => {
+  const startVoiceSession = useCallback(async (resetReconnect = true) => {
+    liveManualStopRef.current = false;
+    if (resetReconnect) {
+      liveReconnectAttemptRef.current = 0;
+    }
     setVoiceError("");
+    setVoiceStatus("connecting");
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setVoiceError("Microphone access is not available in this browser.");
+      setVoiceStatus("error");
       return;
     }
 
@@ -151,6 +245,119 @@ export function ChatView() {
       analyserRef.current = analyser;
       setVoiceActive(true);
 
+      const socket = new WebSocket(
+        getLiveWebSocketUrl(sessionId || getOrCreateMochiSessionId()),
+      );
+      liveSocketRef.current = socket;
+
+      socket.addEventListener("open", () => {
+        setVoiceStatus("listening");
+        socket.send(
+          JSON.stringify({
+            type: "start",
+            session_id: sessionId || getOrCreateMochiSessionId(),
+            source: "chat",
+            mode: "voice",
+          }),
+        );
+
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm";
+        const recorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorderRef.current = recorder;
+
+        recorder.addEventListener("dataavailable", (event) => {
+          if (!event.data.size || socket.readyState !== WebSocket.OPEN) return;
+
+          void blobToDataUrl(event.data).then((dataUrl) => {
+            const payload = dataUrlPayload(dataUrl);
+            socket.send(
+              JSON.stringify({
+                type: "audio",
+                data: payload.data,
+                mime_type: payload.mimeType,
+                source: "chat",
+                turn_complete: false,
+              }),
+            );
+          });
+        });
+
+        recorder.start(250);
+      });
+
+      socket.addEventListener("message", (event) => {
+        if (event.data instanceof Blob) {
+          setVoiceStatus("responding");
+          void event.data.arrayBuffer().then(playLiveAudioBuffer);
+          return;
+        }
+
+        if (event.data instanceof ArrayBuffer) {
+          setVoiceStatus("responding");
+          void playLiveAudioBuffer(event.data);
+          return;
+        }
+
+        const parsed = parseLiveEvent(event.data);
+        if (!parsed) return;
+
+        const eventType = parsed.type ?? parsed.event;
+        if (eventType === "ready") {
+          setVoiceStatus("listening");
+          return;
+        }
+
+        if (eventType === "error") {
+          setVoiceError(parsed.message ?? "Live voice connection failed.");
+          setVoiceStatus("error");
+          return;
+        }
+
+        if (eventType === "done" || parsed.done) {
+          setVoiceStatus("listening");
+          return;
+        }
+
+        const audio =
+          parsed.audio ?? (eventType === "audio" ? parsed.data : undefined);
+        if (audio) {
+          setVoiceStatus("responding");
+          void playLiveAudio(audio);
+          return;
+        }
+
+        const text = parsed.text ?? parsed.message ?? parsed.transcript;
+        if (text) {
+          setVoiceStatus("responding");
+          appendLiveMessage(text);
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        if (
+          !liveManualStopRef.current &&
+          mediaStreamRef.current?.active &&
+          liveReconnectAttemptRef.current < 3
+        ) {
+          liveReconnectAttemptRef.current += 1;
+          setVoiceStatus("connecting");
+          liveReconnectTimerRef.current = window.setTimeout(() => {
+            stopVoiceSession(false);
+            void startVoiceSessionRef.current(false);
+          }, 700 + liveReconnectAttemptRef.current * 450);
+          return;
+        }
+
+        setVoiceStatus((current) => (current === "error" ? "error" : "idle"));
+      });
+
+      socket.addEventListener("error", () => {
+        setVoiceError("Live voice connection failed. Check the proxy and try again.");
+        setVoiceStatus("error");
+      });
+
       const data = new Uint8Array(analyser.frequencyBinCount);
       const barCount = DEFAULT_VOICE_LEVELS.length;
 
@@ -173,9 +380,20 @@ export function ChatView() {
     } catch {
       stopVoiceSession(false);
       setVoiceActive(false);
+      setVoiceStatus("error");
       setVoiceError("Mic permission is needed for live voice chat.");
     }
-  }, [stopVoiceSession]);
+  }, [
+    appendLiveMessage,
+    playLiveAudio,
+    playLiveAudioBuffer,
+    sessionId,
+    stopVoiceSession,
+  ]);
+
+  useEffect(() => {
+    startVoiceSessionRef.current = startVoiceSession;
+  }, [startVoiceSession]);
 
   const sendMutation = useMutation<
     SendMessageResult,
@@ -563,10 +781,16 @@ export function ChatView() {
                     </span>
                     <span className="min-w-0">
                       <span className="block text-sm font-black">
-                        Live listening
+                        {voiceStatus === "connecting"
+                          ? "Live connecting"
+                          : voiceStatus === "responding"
+                            ? "Mochi is responding"
+                            : voiceStatus === "error"
+                              ? "Live paused"
+                              : "Live listening"}
                       </span>
                       <span className="block truncate text-xs font-extrabold text-white/72">
-                        Tap to hang up
+                        {voiceError || "Tap to hang up"}
                       </span>
                     </span>
                   </span>
@@ -657,7 +881,9 @@ export function ChatView() {
                       aria-label="Start live voice chat"
                       variant="secondary"
                       size="icon"
-                      onClick={startVoiceSession}
+                      onClick={() => {
+                        void startVoiceSession();
+                      }}
                       className="rounded-full text-[#5f586f] hover:text-[#302d43]"
                     >
                       <Mic size={19} aria-hidden />
