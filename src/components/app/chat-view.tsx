@@ -25,11 +25,11 @@ import { cn } from "@/lib/utils";
 import { starterPrompts } from "@/lib/data/mochi";
 import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
 import {
-  base64ToArrayBuffer,
-  blobToDataUrl,
-  dataUrlPayload,
+  base64ToBytes,
+  bytesToBase64,
   getLiveWebSocketUrl,
   parseLiveEvent,
+  sampleRateFromMime,
   type LiveConnectionStatus,
 } from "@/lib/live/ws-client";
 import type {
@@ -43,6 +43,12 @@ const DEFAULT_VOICE_LEVELS = [
   0.34, 0.52, 0.42, 0.7, 0.48, 0.82, 0.56, 0.76, 0.44, 0.62, 0.38,
   0.58,
 ];
+const LIVE_PROCESSOR_BUFFER_SIZE = 1024;
+const LIVE_TARGET_SAMPLE_RATE = 16000;
+const LIVE_BACKPRESSURE_BYTES = 512 * 1024;
+const LIVE_PRE_SPEECH_FRAME_LIMIT = 4;
+const LIVE_END_OF_SPEECH_MS = 650;
+const LIVE_CALIBRATION_FRAMES = 36;
 
 type PendingAttachment = ChatAttachment & {
   localId: string;
@@ -61,14 +67,23 @@ export function ChatView() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const attachmentUrlsRef = useRef<Set<string>>(new Set());
   const audioContextRef = useRef<AudioContext | null>(null);
+  const captureAudioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const liveSocketRef = useRef<WebSocket | null>(null);
   const liveAudioQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const livePlaybackTimeRef = useRef(0);
+  const livePlaybackGenerationRef = useRef(0);
+  const livePlaybackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const liveManualStopRef = useRef(false);
+  const liveExpectedCloseRef = useRef(false);
   const liveReconnectAttemptRef = useRef(0);
   const liveReconnectTimerRef = useRef<number | null>(null);
+  const liveSessionGenerationRef = useRef(0);
+  const liveCaptureGenerationRef = useRef(0);
+  const liveSentMediaIdsRef = useRef<Set<string>>(new Set());
   const startVoiceSessionRef = useRef<(resetReconnect?: boolean) => Promise<void>>(
     async () => undefined,
   );
@@ -121,7 +136,7 @@ export function ChatView() {
   const lastMessageContent = messages.at(-1)?.content;
 
   const appendLiveMessage = useCallback(
-    (content: string) => {
+    (content: string, role: ChatMessage["role"] = "mochi") => {
       if (!conversationId || !content.trim()) return;
 
       queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) => [
@@ -129,7 +144,7 @@ export function ChatView() {
         {
           id: `msg-live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           conversationId,
-          role: "mochi",
+          role,
           kind: "text",
           content,
           status: "sent",
@@ -140,53 +155,95 @@ export function ChatView() {
     [conversationId, messagesKey, queryClient],
   );
 
-  const playLiveAudioBuffer = useCallback(async (buffer: ArrayBuffer) => {
-    const audioContext = audioContextRef.current;
-    if (!audioContext) return;
+  const stopLivePlayback = useCallback(() => {
+    livePlaybackGenerationRef.current += 1;
+    livePlaybackSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        // The source may already have ended.
+      }
+    });
+    livePlaybackSourcesRef.current.clear();
+    livePlaybackTimeRef.current = 0;
+    liveAudioQueueRef.current = Promise.resolve();
+  }, []);
 
-    liveAudioQueueRef.current = liveAudioQueueRef.current
-      .catch(() => undefined)
-      .then(async () => {
-        const audioBuffer = await audioContext.decodeAudioData(buffer.slice(0));
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
+  const ensurePlaybackContext = useCallback(async () => {
+    const AudioContextCtor = getAudioContextCtor();
+    if (!AudioContextCtor) throw new Error("Audio playback is unavailable.");
 
-        await new Promise<void>((resolve) => {
-          source.onended = () => resolve();
-          source.start();
-        });
-      })
-      .catch(() => undefined);
+    const context = audioContextRef.current ?? new AudioContextCtor();
+    audioContextRef.current = context;
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+    return context;
   }, []);
 
   const playLiveAudio = useCallback(
-    async (base64Audio: string) => {
-      await playLiveAudioBuffer(base64ToArrayBuffer(base64Audio));
+    async (payload: unknown) => {
+      const generation = livePlaybackGenerationRef.current;
+      liveAudioQueueRef.current = liveAudioQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (generation !== livePlaybackGenerationRef.current) return;
+          const audio =
+            typeof payload === "string"
+              ? { data: payload, mime_type: "audio/pcm;rate=24000" }
+              : (payload as { data?: string; mime_type?: string; mimeType?: string });
+          if (!audio?.data) return;
+
+          const mimeType = audio.mime_type ?? audio.mimeType ?? "";
+          const sampleRate = sampleRateFromMime(mimeType) || 24000;
+          const samples = base64PCMToFloat32(audio.data, mimeType);
+          if (!samples.length) return;
+
+          const context = await ensurePlaybackContext();
+          if (generation !== livePlaybackGenerationRef.current) return;
+
+          const buffer = context.createBuffer(1, samples.length, sampleRate);
+          buffer.getChannelData(0).set(samples);
+          const source = context.createBufferSource();
+          source.buffer = buffer;
+          source.connect(context.destination);
+          livePlaybackSourcesRef.current.add(source);
+          source.onended = () => livePlaybackSourcesRef.current.delete(source);
+
+          const startAt = Math.max(context.currentTime + 0.02, livePlaybackTimeRef.current || 0);
+          source.start(startAt);
+          livePlaybackTimeRef.current = startAt + buffer.duration;
+        })
+        .catch(() => undefined);
+      await liveAudioQueueRef.current;
     },
-    [playLiveAudioBuffer],
+    [ensurePlaybackContext],
   );
 
   const stopVoiceSession = useCallback((resetState = true) => {
     liveManualStopRef.current = true;
+    liveExpectedCloseRef.current = true;
+    liveSessionGenerationRef.current += 1;
+    liveCaptureGenerationRef.current += 1;
     if (liveReconnectTimerRef.current !== null) {
       window.clearTimeout(liveReconnectTimerRef.current);
       liveReconnectTimerRef.current = null;
     }
 
-    if (mediaRecorderRef.current?.state !== "inactive") {
-      mediaRecorderRef.current?.stop();
-    }
-    mediaRecorderRef.current = null;
-
     if (liveSocketRef.current?.readyState === WebSocket.OPEN) {
-      liveSocketRef.current.send(
-        JSON.stringify({ type: "done", turn_complete: true }),
-      );
+      liveSocketRef.current.send(JSON.stringify({ type: "audio_end" }));
+      liveSocketRef.current.send(JSON.stringify({ type: "close" }));
     }
     liveSocketRef.current?.close();
     liveSocketRef.current = null;
 
+    if (audioProcessorRef.current) {
+      audioProcessorRef.current.onaudioprocess = null;
+      safeDisconnect(audioProcessorRef.current);
+    }
+    if (audioSourceRef.current) {
+      safeDisconnect(audioSourceRef.current);
+    }
     if (voiceFrameRef.current !== null) {
       window.cancelAnimationFrame(voiceFrameRef.current);
       voiceFrameRef.current = null;
@@ -194,7 +251,13 @@ export function ChatView() {
 
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaStreamRef.current = null;
+    audioSourceRef.current = null;
+    audioProcessorRef.current = null;
     analyserRef.current = null;
+
+    void captureAudioContextRef.current?.close().catch(() => undefined);
+    captureAudioContextRef.current = null;
+    stopLivePlayback();
 
     if (audioContextRef.current) {
       void audioContextRef.current.close().catch(() => undefined);
@@ -206,12 +269,190 @@ export function ChatView() {
       setVoiceStatus("idle");
       setVoiceLevels(DEFAULT_VOICE_LEVELS);
     }
+  }, [stopLivePlayback]);
+
+  const sendLiveMediaAttachment = useCallback((attachment: PendingAttachment) => {
+    const socket = liveSocketRef.current;
+    if (
+      !attachment.media_id ||
+      attachment.uploadStatus !== "ready" ||
+      liveSentMediaIdsRef.current.has(attachment.media_id) ||
+      socket?.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+    liveSentMediaIdsRef.current.add(attachment.media_id);
+    socket.send(
+      JSON.stringify({
+        type: "media",
+        media_id: attachment.media_id,
+        caption: attachment.caption || "Use this image as the current visual context.",
+        source: attachment.source || "chat",
+        role: attachment.role || "user",
+        turn_complete: false,
+      }),
+    );
   }, []);
+
+  const startLiveCapture = useCallback(
+    async (socket: WebSocket, generation: number) => {
+      if (socket.readyState !== WebSocket.OPEN || liveSessionGenerationRef.current !== generation) return;
+      if (mediaStreamRef.current) return;
+
+      const captureGeneration = ++liveCaptureGenerationRef.current;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      if (liveSessionGenerationRef.current !== generation || liveCaptureGenerationRef.current !== captureGeneration) {
+        stopMediaStream(stream);
+        return;
+      }
+
+      const AudioContextCtor = getAudioContextCtor();
+      if (!AudioContextCtor) {
+        stopMediaStream(stream);
+        throw new Error("Web Audio is not available in this browser.");
+      }
+
+      const audioContext = new AudioContextCtor();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      const processor = audioContext.createScriptProcessor(LIVE_PROCESSOR_BUFFER_SIZE, 1, 1);
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.72;
+      source.connect(analyser);
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      mediaStreamRef.current = stream;
+      captureAudioContextRef.current = audioContext;
+      audioSourceRef.current = source;
+      audioProcessorRef.current = processor;
+      analyserRef.current = analyser;
+
+      const track = stream.getAudioTracks()[0];
+      socket.send(
+        JSON.stringify({
+          type: "client_trace",
+          content: JSON.stringify({
+            kind: "input_device",
+            label: track?.label ?? "",
+            sample_rate: audioContext.sampleRate,
+            context_sample_rate: audioContext.sampleRate,
+          }),
+        }),
+      );
+
+      let speechActive = false;
+      let lastSpeechAt = 0;
+      let calibrationFrames = 0;
+      let calibrationRMS = 0;
+      let noiseFloor = 0.006;
+      const preSpeechFrames: Uint8Array[] = [];
+      const sendAudioFrame = (data: string) => {
+        if (
+          socket.readyState !== WebSocket.OPEN ||
+          socket.bufferedAmount > LIVE_BACKPRESSURE_BYTES ||
+          liveSessionGenerationRef.current !== generation
+        ) {
+          return;
+        }
+        socket.send(
+          JSON.stringify({
+            type: "audio",
+            mime_type: `audio/pcm;rate=${LIVE_TARGET_SAMPLE_RATE}`,
+            data,
+          }),
+        );
+      };
+      const sendActivity = (type: "activity_start" | "activity_end") => {
+        if (socket.readyState === WebSocket.OPEN && liveSessionGenerationRef.current === generation) {
+          socket.send(JSON.stringify({ type }));
+        }
+      };
+
+      processor.onaudioprocess = (event) => {
+        if (liveSessionGenerationRef.current !== generation || socket.readyState !== WebSocket.OPEN) return;
+        const input = event.inputBuffer.getChannelData(0);
+        const metrics = audioFrameMetrics(input);
+        const now = performance.now();
+
+        if (calibrationFrames < LIVE_CALIBRATION_FRAMES) {
+          calibrationFrames += 1;
+          calibrationRMS += metrics.rms;
+          noiseFloor = Math.max(0.003, calibrationRMS / calibrationFrames);
+        } else if (!speechActive) {
+          noiseFloor = noiseFloor * 0.96 + metrics.rms * 0.04;
+        }
+
+        const pcm = downsampleToPCM16(input, audioContext.sampleRate, LIVE_TARGET_SAMPLE_RATE);
+        if (!pcm.length) return;
+
+        const speechThreshold = Math.max(0.012, Math.min(0.08, noiseFloor * 3.4 + 0.004));
+        const peakThreshold = Math.max(0.08, speechThreshold * 4);
+        const hasSpeech = metrics.rms >= speechThreshold || metrics.peak >= peakThreshold;
+
+        if (hasSpeech) {
+          lastSpeechAt = now;
+          if (!speechActive) {
+            speechActive = true;
+            sendActivity("activity_start");
+            setVoiceStatus("speaking");
+            for (const frame of preSpeechFrames.splice(0)) {
+              sendAudioFrame(bytesToBase64(frame));
+            }
+          }
+        }
+
+        if (speechActive) {
+          sendAudioFrame(bytesToBase64(pcm));
+          if (!hasSpeech && now - lastSpeechAt > LIVE_END_OF_SPEECH_MS) {
+            speechActive = false;
+            preSpeechFrames.length = 0;
+            sendActivity("activity_end");
+            setVoiceStatus("thinking");
+          }
+          return;
+        }
+
+        preSpeechFrames.push(pcm);
+        if (preSpeechFrames.length > LIVE_PRE_SPEECH_FRAME_LIMIT) {
+          preSpeechFrames.shift();
+        }
+      };
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const barCount = DEFAULT_VOICE_LEVELS.length;
+      const updateLevels = () => {
+        if (liveSessionGenerationRef.current !== generation || !analyserRef.current) return;
+        analyser.getByteFrequencyData(data);
+        const bucketSize = Math.max(1, Math.floor(data.length / barCount));
+        const nextLevels = Array.from({ length: barCount }, (_, index) => {
+          const start = index * bucketSize;
+          const bucket = data.slice(start, start + bucketSize);
+          const average = bucket.reduce((total, value) => total + value, 0) / bucket.length;
+          return Math.max(0.18, Math.min(1, average / 150));
+        });
+        setVoiceLevels(nextLevels);
+        voiceFrameRef.current = window.requestAnimationFrame(updateLevels);
+      };
+      updateLevels();
+      setVoiceStatus("listening");
+    },
+    [],
+  );
 
   const startVoiceSession = useCallback(async (resetReconnect = true) => {
     liveManualStopRef.current = false;
+    liveExpectedCloseRef.current = false;
     if (resetReconnect) {
       liveReconnectAttemptRef.current = 0;
+      liveSentMediaIdsRef.current.clear();
     }
     setVoiceError("");
     setVoiceStatus("connecting");
@@ -223,26 +464,8 @@ export function ChatView() {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const AudioContextCtor =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-
-      if (!AudioContextCtor) {
-        throw new Error("Web Audio is not available in this browser.");
-      }
-
-      const audioContext = new AudioContextCtor();
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.72;
-      source.connect(analyser);
-
-      mediaStreamRef.current = stream;
-      audioContextRef.current = audioContext;
-      analyserRef.current = analyser;
+      await ensurePlaybackContext();
+      const generation = ++liveSessionGenerationRef.current;
       setVoiceActive(true);
 
       const socket = new WebSocket(
@@ -251,7 +474,10 @@ export function ChatView() {
       liveSocketRef.current = socket;
 
       socket.addEventListener("open", () => {
-        setVoiceStatus("listening");
+        if (liveSessionGenerationRef.current !== generation) {
+          socket.close();
+          return;
+        }
         socket.send(
           JSON.stringify({
             type: "start",
@@ -260,57 +486,29 @@ export function ChatView() {
             mode: "voice",
           }),
         );
-
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm";
-        const recorder = new MediaRecorder(stream, { mimeType });
-        mediaRecorderRef.current = recorder;
-
-        recorder.addEventListener("dataavailable", (event) => {
-          if (!event.data.size || socket.readyState !== WebSocket.OPEN) return;
-
-          void blobToDataUrl(event.data).then((dataUrl) => {
-            const payload = dataUrlPayload(dataUrl);
-            socket.send(
-              JSON.stringify({
-                type: "audio",
-                data: payload.data,
-                mime_type: payload.mimeType,
-                source: "chat",
-                turn_complete: false,
-              }),
-            );
-          });
-        });
-
-        recorder.start(250);
       });
 
       socket.addEventListener("message", (event) => {
-        if (event.data instanceof Blob) {
-          setVoiceStatus("responding");
-          void event.data.arrayBuffer().then(playLiveAudioBuffer);
-          return;
-        }
-
-        if (event.data instanceof ArrayBuffer) {
-          setVoiceStatus("responding");
-          void playLiveAudioBuffer(event.data);
-          return;
-        }
-
         const parsed = parseLiveEvent(event.data);
         if (!parsed) return;
 
         const eventType = parsed.type ?? parsed.event;
-        if (eventType === "ready") {
+        if (eventType === "ready" || eventType === "live_ready") {
           setVoiceStatus("listening");
+          return;
+        }
+        if (eventType === "live_setup_complete") {
+          void startLiveCapture(socket, generation).then(() => {
+            attachments.forEach(sendLiveMediaAttachment);
+          });
+          return;
+        }
+        if (eventType === "media_received") {
           return;
         }
 
         if (eventType === "error") {
-          setVoiceError(parsed.message ?? "Live voice connection failed.");
+          setVoiceError(parsed.message ?? parsed.error ?? "Live voice connection failed.");
           setVoiceStatus("error");
           return;
         }
@@ -321,24 +519,30 @@ export function ChatView() {
         }
 
         const audio =
-          parsed.audio ?? (eventType === "audio" ? parsed.data : undefined);
+          parsed.audio ??
+          (eventType === "audio" || eventType === "live_audio" ? parsed.data : undefined);
         if (audio) {
           setVoiceStatus("responding");
           void playLiveAudio(audio);
           return;
         }
 
-        const text = parsed.text ?? parsed.message ?? parsed.transcript;
+        const text = parsed.content ?? parsed.text ?? parsed.message ?? parsed.transcript;
         if (text) {
           setVoiceStatus("responding");
+          if (eventType === "live_transcript" && parsed.role === "user") return;
+          if (eventType === "message") {
+            appendLiveMessage(text, parsed.role === "user" ? "user" : "mochi");
+            return;
+          }
           appendLiveMessage(text);
         }
       });
 
       socket.addEventListener("close", () => {
         if (
+          !liveExpectedCloseRef.current &&
           !liveManualStopRef.current &&
-          mediaStreamRef.current?.active &&
           liveReconnectAttemptRef.current < 3
         ) {
           liveReconnectAttemptRef.current += 1;
@@ -357,26 +561,6 @@ export function ChatView() {
         setVoiceError("Live voice connection failed. Check the proxy and try again.");
         setVoiceStatus("error");
       });
-
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const barCount = DEFAULT_VOICE_LEVELS.length;
-
-      const updateLevels = () => {
-        analyser.getByteFrequencyData(data);
-        const bucketSize = Math.max(1, Math.floor(data.length / barCount));
-        const nextLevels = Array.from({ length: barCount }, (_, index) => {
-          const start = index * bucketSize;
-          const bucket = data.slice(start, start + bucketSize);
-          const average =
-            bucket.reduce((total, value) => total + value, 0) / bucket.length;
-          return Math.max(0.18, Math.min(1, average / 150));
-        });
-
-        setVoiceLevels(nextLevels);
-        voiceFrameRef.current = window.requestAnimationFrame(updateLevels);
-      };
-
-      updateLevels();
     } catch {
       stopVoiceSession(false);
       setVoiceActive(false);
@@ -385,9 +569,12 @@ export function ChatView() {
     }
   }, [
     appendLiveMessage,
+    attachments,
+    ensurePlaybackContext,
     playLiveAudio,
-    playLiveAudioBuffer,
+    sendLiveMediaAttachment,
     sessionId,
+    startLiveCapture,
     stopVoiceSession,
   ]);
 
@@ -611,19 +798,21 @@ export function ChatView() {
         void apiClient
           .uploadAttachment(file)
           .then((uploaded) => {
+            const readyAttachment: PendingAttachment = {
+              ...pendingAttachment,
+              media_id: uploaded.media_id,
+              fileName: uploaded.fileName ?? pendingAttachment.fileName,
+              mimeType: uploaded.mimeType ?? pendingAttachment.mimeType,
+              uploadStatus: "ready",
+            };
             setAttachments((current) =>
               current.map((attachment) =>
                 attachment.localId === localId
-                  ? {
-                      ...attachment,
-                      media_id: uploaded.media_id,
-                      fileName: uploaded.fileName ?? attachment.fileName,
-                      mimeType: uploaded.mimeType ?? attachment.mimeType,
-                      uploadStatus: "ready",
-                    }
+                  ? readyAttachment
                   : attachment,
               ),
             );
+            sendLiveMediaAttachment(readyAttachment);
           })
           .catch((error: unknown) => {
             setAttachments((current) =>
@@ -783,6 +972,10 @@ export function ChatView() {
                       <span className="block text-sm font-black">
                         {voiceStatus === "connecting"
                           ? "Live connecting"
+                          : voiceStatus === "speaking"
+                            ? "Listening to you"
+                            : voiceStatus === "thinking"
+                              ? "Mochi is thinking"
                           : voiceStatus === "responding"
                             ? "Mochi is responding"
                             : voiceStatus === "error"
@@ -940,6 +1133,94 @@ function VoiceLevelMeter({ levels }: { levels: number[] }) {
       ))}
     </span>
   );
+}
+
+function getAudioContextCtor() {
+  return (
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext
+  );
+}
+
+function stopMediaStream(stream: MediaStream) {
+  stream.getTracks().forEach((track) => {
+    track.enabled = false;
+    track.stop();
+  });
+}
+
+function safeDisconnect(node: AudioNode) {
+  try {
+    node.disconnect();
+  } catch {
+    // Already disconnected.
+  }
+}
+
+function downsampleToPCM16(
+  input: Float32Array,
+  inputSampleRate: number,
+  targetSampleRate: number,
+): Uint8Array {
+  if (!input.length || inputSampleRate <= 0 || targetSampleRate <= 0) {
+    return new Uint8Array();
+  }
+  const ratio = Math.max(inputSampleRate / targetSampleRate, 1);
+  const outputLength = Math.floor(input.length / ratio);
+  const bytes = new Uint8Array(outputLength * 2);
+  const view = new DataView(bytes.buffer);
+
+  for (let index = 0; index < outputLength; index += 1) {
+    const start = Math.floor(index * ratio);
+    const end = Math.min(Math.floor((index + 1) * ratio), input.length);
+    let total = 0;
+    const count = Math.max(end - start, 1);
+
+    for (let sourceIndex = start; sourceIndex < end; sourceIndex += 1) {
+      total += input[sourceIndex] || 0;
+    }
+
+    const sample = Math.max(-1, Math.min(1, total / count));
+    view.setInt16(
+      index * 2,
+      sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+      true,
+    );
+  }
+
+  return bytes;
+}
+
+function audioFrameMetrics(input: Float32Array): { rms: number; peak: number } {
+  if (!input.length) return { rms: 0, peak: 0 };
+  let sum = 0;
+  let peak = 0;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const value = Math.abs(input[index] || 0);
+    sum += value * value;
+    if (value > peak) peak = value;
+  }
+
+  return { rms: Math.sqrt(sum / input.length), peak };
+}
+
+function base64PCMToFloat32(value: string, mimeType: string): Float32Array {
+  const bytes = base64ToBytes(value);
+  const sampleCount = Math.floor(bytes.byteLength / 2);
+  const samples = new Float32Array(sampleCount);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const littleEndian = !/audio\/l16/i.test(mimeType);
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    samples[index] = Math.max(
+      -1,
+      Math.min(1, view.getInt16(index * 2, littleEndian) / 32768),
+    );
+  }
+
+  return samples;
 }
 
 function PromptSuggestions({

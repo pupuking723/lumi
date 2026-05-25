@@ -4,7 +4,7 @@ import type { ChatMessage, SendMessageInput } from "@/types/lumi";
 
 export const dynamic = "force-dynamic";
 
-const DEFAULT_AGENT_BASE_URL = "http://192.168.6.203:9600";
+const DEFAULT_AGENT_BASE_URL = "http://127.0.0.1:9600";
 const DEFAULT_AGENT_MODEL = "agent:closy";
 const DEFAULT_AGENT_TOKEN = "dev-token";
 
