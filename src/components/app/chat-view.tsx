@@ -43,6 +43,7 @@ import {
   bytesToBase64,
   getLiveWebSocketUrl,
   parseLiveEvent,
+  prepareLiveWebSocketSession,
   sampleRateFromMime,
   type LiveConnectionStatus,
 } from "@/lib/live/ws-client";
@@ -101,6 +102,8 @@ export function ChatView() {
   const liveCaptureGenerationRef = useRef(0);
   const liveSentMediaIdsRef = useRef<Set<string>>(new Set());
   const liveAssistantMessageIdRef = useRef<string | null>(null);
+  const liveUserMessageIdRef = useRef<string | null>(null);
+  const liveLastUserTranscriptRef = useRef("");
   const startVoiceSessionRef = useRef<
     (resetReconnect?: boolean) => Promise<void>
   >(async () => undefined);
@@ -173,6 +176,69 @@ export function ChatView() {
     },
     [conversationId, messagesKey, queryClient],
   );
+
+  const upsertLiveUserTranscript = useCallback(
+    (content: string, status: ChatMessage["status"] = "sending") => {
+      const text = content.trim();
+      if (!conversationId || !text) return false;
+
+      let handled = false;
+      queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) => {
+        const messageId = liveUserMessageIdRef.current;
+
+        if (messageId) {
+          let found = false;
+          const nextMessages = current.map((message) => {
+            if (message.id !== messageId) return message;
+
+            found = true;
+            handled = true;
+            const nextContent = mergeLiveTranscript(message.content, text);
+            liveLastUserTranscriptRef.current = nextContent;
+            return {
+              ...message,
+              content: nextContent,
+              status,
+            };
+          });
+
+          if (found) return nextMessages;
+        }
+
+        const nextMessageId = `msg-live-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        liveUserMessageIdRef.current = nextMessageId;
+        liveLastUserTranscriptRef.current = text;
+        handled = true;
+        return [
+          ...current,
+          {
+            id: nextMessageId,
+            conversationId,
+            role: "user",
+            kind: "text",
+            content: text,
+            status,
+            createdAt: new Date().toISOString(),
+          },
+        ];
+      });
+
+      return handled;
+    },
+    [conversationId, messagesKey, queryClient],
+  );
+
+  const finishLiveUserTranscript = useCallback(() => {
+    const messageId = liveUserMessageIdRef.current;
+    liveUserMessageIdRef.current = null;
+    if (!messageId) return;
+
+    queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
+      current.map((message) =>
+        message.id === messageId ? { ...message, status: "sent" } : message,
+      ),
+    );
+  }, [messagesKey, queryClient]);
 
   const appendLiveAssistantDelta = useCallback(
     (delta: string) => {
@@ -376,6 +442,8 @@ export function ChatView() {
       audioSourceRef.current = null;
       audioProcessorRef.current = null;
       analyserRef.current = null;
+      liveUserMessageIdRef.current = null;
+      liveLastUserTranscriptRef.current = "";
 
       void captureAudioContextRef.current?.close().catch(() => undefined);
       captureAudioContextRef.current = null;
@@ -627,6 +695,7 @@ export function ChatView() {
 
       try {
         await ensurePlaybackContext();
+        await prepareLiveWebSocketSession();
         const generation = ++liveSessionGenerationRef.current;
         setVoiceActive(true);
 
@@ -706,26 +775,38 @@ export function ChatView() {
             parsed.transcript;
           if (text) {
             setVoiceStatus("responding");
-            if (eventType === "live_transcript" && parsed.role === "user")
+            if (eventType === "live_transcript" && parsed.role === "user") {
+              upsertLiveUserTranscript(text);
               return;
+            }
             if (
               eventType === "live_transcript" &&
               parsed.role === "assistant"
             ) {
+              finishLiveUserTranscript();
               appendLiveAssistantDelta(text);
               return;
             }
             if (eventType === "message") {
               if (parsed.role === "assistant") {
+                finishLiveUserTranscript();
                 finalizeLiveAssistantMessage(text);
               } else {
-                appendLiveMessage(
-                  text,
-                  parsed.role === "user" ? "user" : "mochi",
-                );
+                if (parsed.role === "user") {
+                  const alreadyShown =
+                    liveLastUserTranscriptRef.current.trim() &&
+                    textsOverlap(liveLastUserTranscriptRef.current, text);
+                  if (!alreadyShown) {
+                    upsertLiveUserTranscript(text, "sent");
+                  }
+                  finishLiveUserTranscript();
+                } else {
+                  appendLiveMessage(text);
+                }
               }
               return;
             }
+            finishLiveUserTranscript();
             appendLiveMessage(text);
           }
         });
@@ -770,6 +851,7 @@ export function ChatView() {
       attachments,
       clearLiveAssistantDraft,
       ensurePlaybackContext,
+      finishLiveUserTranscript,
       finalizeLiveAssistantMessage,
       playLiveAudio,
       sendLiveMediaAttachment,
@@ -777,6 +859,7 @@ export function ChatView() {
       startLiveCapture,
       stopLivePlayback,
       stopVoiceSession,
+      upsertLiveUserTranscript,
     ],
   );
 
@@ -1590,6 +1673,27 @@ function appendLiveTranscript(current: string, next: string): string {
   if (!current) return text;
   if (/^[，。！？,.!?;；:：]/.test(text)) return `${current}${text}`;
   return `${current}${/[\s\n]$/.test(current) ? "" : " "}${text}`;
+}
+
+function mergeLiveTranscript(current: string, next: string): string {
+  const currentText = current.trim();
+  const nextText = next.trim();
+  if (!currentText) return nextText;
+  if (!nextText) return currentText;
+  if (nextText.startsWith(currentText)) return nextText;
+  if (currentText.startsWith(nextText)) return currentText;
+  return appendLiveTranscript(currentText, nextText);
+}
+
+function textsOverlap(current: string, next: string): boolean {
+  const currentText = current.trim();
+  const nextText = next.trim();
+  return (
+    Boolean(currentText && nextText) &&
+    (currentText === nextText ||
+      currentText.includes(nextText) ||
+      nextText.includes(currentText))
+  );
 }
 
 function PromptSuggestions({

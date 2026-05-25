@@ -24,12 +24,40 @@ export interface LiveServerEvent {
 }
 
 export function getLiveWebSocketUrl(sessionId: string) {
-  const path =
+  const endpoint =
+    process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL ??
     process.env.NEXT_PUBLIC_LUMI_LIVE_WS_PATH ?? "/api/live/gemini/ws";
-  const url = new URL(path, window.location.href);
-  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+
+  const url = new URL(endpoint, window.location.href);
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  } else if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+    url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  }
+
   url.searchParams.set("session_id", sessionId);
   return url.toString();
+}
+
+export async function prepareLiveWebSocketSession() {
+  const path =
+    process.env.NEXT_PUBLIC_LUMI_LIVE_SESSION_PATH ?? "/api/live/session";
+  if (path === "off") return;
+
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(
+      message || `Live session cookie setup failed with ${response.status}`,
+    );
+  }
 }
 
 export function blobToDataUrl(blob: Blob) {

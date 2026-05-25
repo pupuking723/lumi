@@ -1,12 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   base64ToArrayBuffer,
   dataUrlPayload,
   getLiveWebSocketUrl,
   parseLiveEvent,
+  prepareLiveWebSocketSession,
 } from "./ws-client";
 
 describe("Live WebSocket client helpers", () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL;
+    delete process.env.NEXT_PUBLIC_LUMI_LIVE_WS_PATH;
+    delete process.env.NEXT_PUBLIC_LUMI_LIVE_SESSION_PATH;
+  });
+
   it("builds a same-origin websocket URL with the session id", () => {
     window.history.pushState({}, "", "/chat");
 
@@ -14,6 +21,49 @@ describe("Live WebSocket client helpers", () => {
     expect(url.pathname).toBe("/api/live/gemini/ws");
     expect(url.searchParams.get("session_id")).toBe("mochi-session");
     expect(["ws:", "wss:"]).toContain(url.protocol);
+  });
+
+  it("uses an absolute websocket URL when configured", () => {
+    process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL =
+      "wss://api.example.test/v1/closy/live/gemini/ws?token=abc";
+
+    const url = new URL(getLiveWebSocketUrl("mochi-session"));
+    expect(url.origin).toBe("wss://api.example.test");
+    expect(url.pathname).toBe("/v1/closy/live/gemini/ws");
+    expect(url.searchParams.get("token")).toBe("abc");
+    expect(url.searchParams.get("session_id")).toBe("mochi-session");
+  });
+
+  it("converts an absolute http URL to a websocket URL", () => {
+    process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL =
+      "https://api.example.test/v1/closy/live/gemini/ws";
+
+    const url = new URL(getLiveWebSocketUrl("mochi-session"));
+    expect(url.protocol).toBe("wss:");
+    expect(url.pathname).toBe("/v1/closy/live/gemini/ws");
+  });
+
+  it("prepares the server-set live cookie before connecting", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await prepareLiveWebSocketSession();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/live/session", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+  });
+
+  it("can skip live cookie preparation", async () => {
+    process.env.NEXT_PUBLIC_LUMI_LIVE_SESSION_PATH = "off";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await prepareLiveWebSocketSession();
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("parses JSON events and plain text messages", () => {
