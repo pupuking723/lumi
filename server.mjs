@@ -43,7 +43,7 @@ const port = Number(process.env.PORT ?? 3000);
 const app = next({ dev, dir, hostname, port });
 const handle = app.getRequestHandler();
 
-const DEFAULT_AGENT_BASE_URL = "http://192.168.6.203:9600";
+const DEFAULT_AGENT_BASE_URL = "http://127.0.0.1:9600";
 const DEFAULT_LIVE_WS_PATH = "/v1/closy/live/gemini/ws";
 const LOCAL_LIVE_PROXY_PATH = "/api/live/gemini/ws";
 

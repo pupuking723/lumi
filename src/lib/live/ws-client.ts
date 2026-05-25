@@ -2,16 +2,21 @@ export type LiveConnectionStatus =
   | "idle"
   | "connecting"
   | "listening"
+  | "speaking"
+  | "thinking"
   | "responding"
   | "error";
 
 export interface LiveServerEvent {
   type?: string;
   event?: string;
+  role?: "user" | "assistant" | string;
+  content?: string;
+  error?: string;
   message?: string;
   text?: string;
   transcript?: string;
-  data?: string;
+  data?: string | { data?: string; mime_type?: string; mimeType?: string; [key: string]: unknown };
   audio?: string;
   mime_type?: string;
   mimeType?: string;
@@ -64,4 +69,27 @@ export function base64ToArrayBuffer(base64: string) {
   }
 
   return bytes.buffer;
+}
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return window.btoa(binary);
+}
+
+export function base64ToBytes(value: string): Uint8Array {
+  const binary = window.atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+export function sampleRateFromMime(mime: string): number {
+  const match = /(?:^|;)rate=(\d+)/i.exec(mime);
+  return match ? Number.parseInt(match[1], 10) : 0;
 }
