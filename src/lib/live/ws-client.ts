@@ -34,9 +34,20 @@ export function getLiveWebSocketUrl(sessionId: string) {
   } else if (url.protocol !== "ws:" && url.protocol !== "wss:") {
     url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   }
+  if (
+    isLoopbackHost(url.hostname) &&
+    isLoopbackHost(window.location.hostname) &&
+    url.hostname !== window.location.hostname
+  ) {
+    url.hostname = window.location.hostname;
+  }
 
   url.searchParams.set("session_id", sessionId);
   return url.toString();
+}
+
+function isLoopbackHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 export async function prepareLiveWebSocketSession() {

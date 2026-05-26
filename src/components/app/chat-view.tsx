@@ -63,6 +63,7 @@ const LIVE_BACKPRESSURE_BYTES = 512 * 1024;
 const LIVE_PRE_SPEECH_FRAME_LIMIT = 4;
 const LIVE_END_OF_SPEECH_MS = 650;
 const LIVE_CALIBRATION_FRAMES = 36;
+const LIVE_CONNECT_TIMEOUT_MS = 12000;
 
 type PendingAttachment = ChatAttachment & {
   localId: string;
@@ -96,6 +97,7 @@ export function ChatView() {
   const livePlaybackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const liveManualStopRef = useRef(false);
   const liveExpectedCloseRef = useRef(false);
+  const liveConnectTimeoutRef = useRef<number | null>(null);
   const liveReconnectAttemptRef = useRef(0);
   const liveReconnectTimerRef = useRef<number | null>(null);
   const liveSessionGenerationRef = useRef(0);
@@ -417,6 +419,10 @@ export function ChatView() {
         window.clearTimeout(liveReconnectTimerRef.current);
         liveReconnectTimerRef.current = null;
       }
+      if (liveConnectTimeoutRef.current !== null) {
+        window.clearTimeout(liveConnectTimeoutRef.current);
+        liveConnectTimeoutRef.current = null;
+      }
 
       if (liveSocketRef.current?.readyState === WebSocket.OPEN) {
         liveSocketRef.current.send(JSON.stringify({ type: "audio_end" }));
@@ -703,8 +709,31 @@ export function ChatView() {
           getLiveWebSocketUrl(sessionId || getOrCreateMochiSessionId()),
         );
         liveSocketRef.current = socket;
+        let socketOpened = false;
+        const clearConnectTimeout = () => {
+          if (liveConnectTimeoutRef.current !== null) {
+            window.clearTimeout(liveConnectTimeoutRef.current);
+            liveConnectTimeoutRef.current = null;
+          }
+        };
+        liveConnectTimeoutRef.current = window.setTimeout(() => {
+          if (
+            liveSessionGenerationRef.current !== generation ||
+            socket.readyState !== WebSocket.CONNECTING
+          ) {
+            return;
+          }
+          liveExpectedCloseRef.current = true;
+          setVoiceError(
+            "Live voice connection timed out. Check the websocket URL and gateway.",
+          );
+          setVoiceStatus("error");
+          socket.close();
+        }, LIVE_CONNECT_TIMEOUT_MS);
 
         socket.addEventListener("open", () => {
+          clearConnectTimeout();
+          socketOpened = true;
           if (liveSessionGenerationRef.current !== generation) {
             socket.close();
             return;
@@ -812,6 +841,7 @@ export function ChatView() {
         });
 
         socket.addEventListener("close", () => {
+          clearConnectTimeout();
           if (
             !liveExpectedCloseRef.current &&
             !liveManualStopRef.current &&
@@ -833,6 +863,10 @@ export function ChatView() {
         });
 
         socket.addEventListener("error", () => {
+          clearConnectTimeout();
+          if (!socketOpened) {
+            liveExpectedCloseRef.current = true;
+          }
           setVoiceError(
             "Live voice connection failed. Check the proxy and try again.",
           );
@@ -842,7 +876,9 @@ export function ChatView() {
         stopVoiceSession(false);
         setVoiceActive(false);
         setVoiceStatus("error");
-        setVoiceError("Mic permission is needed for live voice chat.");
+        setVoiceError(
+          "Live voice could not start. Check microphone permission and Live session setup.",
+        );
       }
     },
     [
