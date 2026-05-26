@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  FormEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,36 +8,18 @@ import {
   useRef,
   useState,
 } from "react";
-import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
-import {
-  Check,
-  Camera,
-  Images,
-  LoaderCircle,
-  MessageCircle,
-  Mic,
-  PhoneOff,
-  SendHorizonal,
-  Square,
-  X,
-} from "lucide-react";
 import { AppChrome } from "./app-chrome";
-import { Button } from "@/components/ui/button";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  BottomActionControls,
+  ChatComposer,
+  ChatMessagesPanel,
+  MediaMenuLayer,
+  StandaloneMediaButton,
+} from "./chat/chat-view-ui";
 import { apiClient } from "@/lib/api/client";
-import { cn } from "@/lib/utils";
 import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
 import {
-  base64ToBytes,
   bytesToBase64,
   getLiveWebSocketUrl,
   parseLiveEvent,
@@ -46,8 +27,19 @@ import {
   sampleRateFromMime,
   type LiveConnectionStatus,
 } from "@/lib/live/ws-client";
+import {
+  appendLiveTranscript,
+  audioFrameMetrics,
+  base64PCMToFloat32,
+  downsampleToPCM16,
+  getAudioContextCtor,
+  mergeLiveTranscript,
+  safeDisconnect,
+  stopMediaStream,
+  textsOverlap,
+} from "./chat/chat-live-audio";
+import type { PendingAttachment } from "./chat/chat-types";
 import type {
-  ChatAttachment,
   ChatMessage,
   SendMessageInput,
   SendMessageResult,
@@ -63,12 +55,6 @@ const LIVE_PRE_SPEECH_FRAME_LIMIT = 4;
 const LIVE_END_OF_SPEECH_MS = 650;
 const LIVE_CALIBRATION_FRAMES = 36;
 const LIVE_CONNECT_TIMEOUT_MS = 12000;
-
-type PendingAttachment = ChatAttachment & {
-  localId: string;
-  uploadStatus: "uploading" | "ready" | "failed";
-  error?: string;
-};
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
@@ -154,6 +140,7 @@ export function ChatView() {
   const hasFailedAttachments = attachments.some(
     (attachment) => attachment.uploadStatus === "failed",
   );
+  const hasComposerContent = Boolean(draft.trim() || attachments.length);
   const streamingAssistant = streamingAssistantId
     ? messages.find((message) => message.id === streamingAssistantId)
     : undefined;
@@ -692,9 +679,11 @@ export function ChatView() {
       }
       setVoiceError("");
       setVoiceStatus("connecting");
+      setVoiceActive(true);
 
       if (!navigator.mediaDevices?.getUserMedia) {
         setVoiceError("Microphone access is not available in this browser.");
+        setVoiceActive(false);
         setVoiceStatus("error");
         return;
       }
@@ -703,7 +692,6 @@ export function ChatView() {
         await ensurePlaybackContext();
         await prepareLiveWebSocketSession();
         const generation = ++liveSessionGenerationRef.current;
-        setVoiceActive(true);
 
         const socket = new WebSocket(
           getLiveWebSocketUrl(sessionId || getOrCreateMochiSessionId()),
@@ -1052,6 +1040,11 @@ export function ChatView() {
       abortControllerRef.current = null;
     },
   });
+  const sendControlActive =
+    chatPanelOpen &&
+    !voiceActive &&
+    (hasComposerContent || sendMutation.isPending);
+  const textComposerOpen = chatPanelOpen && !voiceActive;
   const showPendingIndicator =
     sendMutation.isPending && !streamingAssistant?.content;
 
@@ -1247,11 +1240,6 @@ export function ChatView() {
     });
   };
 
-  const onSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    submit();
-  };
-
   return (
     <AppChrome
       fixedViewport
@@ -1259,199 +1247,31 @@ export function ChatView() {
       mainClassName="relative min-h-0 overflow-hidden !p-0"
     >
       {chatPanelOpen && (
-        <div
-          className={cn(
-            "fixed right-4 bottom-[calc(5.1rem+env(safe-area-inset-bottom))] z-20 flex h-[66.666dvh] w-[66.666vw] max-w-[520px] flex-col overflow-hidden rounded-[24px] border border-white/82 bg-[#fbfafc]/78 p-3 shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_24px_70px_rgba(42,39,55,0.2)] backdrop-blur-2xl md:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] md:right-[max(1rem,calc((100vw-760px)/2+1rem))]",
-            voiceActive && "bg-[#b8324d]/12",
+        <>
+          <ChatMessagesPanel
+            messageScrollRef={messageScrollRef}
+            messages={messages}
+            showPendingIndicator={showPendingIndicator}
+            showSendError={sendMutation.isError && !lastSendStopped}
+            onRetry={() => lastPayload && submit(lastPayload)}
+          />
+          {textComposerOpen && (
+            <ChatComposer
+              composerBodyRef={composerBodyRef}
+              draftInputRef={draftInputRef}
+              draft={draft}
+              attachments={attachments}
+              mediaSheetOpen={mediaSheetOpen}
+              voiceActive={voiceActive}
+              sendControlActive={sendControlActive}
+              onDraftChange={setDraft}
+              onSubmit={() => submit()}
+              onToggleMediaMenu={() => setMediaSheetOpen((open) => !open)}
+              onRemoveAttachment={removeAttachment}
+            />
           )}
-        >
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            <section
-              ref={messageScrollRef}
-              className="scrollbar-pearl min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-3 pr-1 [-webkit-overflow-scrolling:touch]"
-            >
-              <div className="flex flex-col gap-3">
-                {messages.length === 0 && <WelcomeMessage />}
-                {messages.map((message) => (
-                  <MessageItem key={message.id} message={message} />
-                ))}
-                {showPendingIndicator && (
-                  <div className="lumi-fade-in max-w-full px-1 py-2 text-[#343145]">
-                    <span className="thinking-text-wave text-sm font-bold">
-                      stitching a thought
-                    </span>
-                  </div>
-                )}
-                {sendMutation.isError && !lastSendStopped && (
-                  <div className="lumi-fade-in rounded-[22px] border border-[#ead1d8] bg-[#fff3f5]/86 p-3 text-sm font-bold text-[#9c4a61] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] backdrop-blur-xl">
-                    The thread snagged.{" "}
-                    <button
-                      type="button"
-                      className="underline"
-                      onClick={() => lastPayload && submit(lastPayload)}
-                    >
-                      Retry
-                    </button>
-                  </div>
-                )}
-              </div>
-            </section>
-            <div className="shrink-0 pt-2">
-          <div className="w-full">
-            <form
-              onSubmit={onSubmit}
-              className="w-full rounded-[24px] border border-white/82 bg-[#fbfafc]/76 p-2 shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_22px_58px_rgba(42,39,55,0.18)] backdrop-blur-2xl"
-            >
-              <>
-                {attachments.length > 0 && (
-                    <div className="mb-2 space-y-2">
-                      {attachments.map((attachment) => (
-                        <div
-                          key={attachment.localId}
-                          className="flex items-center justify-between gap-3 rounded-[22px] border border-white/72 bg-[#edeaf1]/72 px-2 py-2 text-xs font-extrabold text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.78)_inset]"
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            {attachment.previewUrl && (
-                              <span className="relative size-10 shrink-0 overflow-hidden rounded-[14px] bg-white/50">
-                                <Image
-                                  src={attachment.previewUrl}
-                                  alt=""
-                                  fill
-                                  sizes="40px"
-                                  className="object-cover"
-                                  unoptimized
-                                />
-                              </span>
-                            )}
-                            <span className="min-w-0">
-                              <span className="block truncate">
-                                {attachment.fileName ?? "Outfit image"}
-                              </span>
-                              <span
-                                className={cn(
-                                  "block text-[0.68rem]",
-                                  attachment.uploadStatus === "failed"
-                                    ? "text-[#9c4a61]"
-                                    : "text-[#8c7897]",
-                                )}
-                              >
-                                {attachment.uploadStatus === "uploading"
-                                  ? "Uploading..."
-                                  : attachment.uploadStatus === "ready"
-                                    ? "Ready for Mochi"
-                                    : "Upload failed"}
-                              </span>
-                            </span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeAttachment(attachment.localId)}
-                          >
-                            remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                )}
-                <div
-                    ref={composerBodyRef}
-                    className={cn(
-                      "gap-2",
-                      composerMultiline ? "flex flex-col" : "flex items-end",
-                    )}
-                  >
-                    <textarea
-                      ref={draftInputRef}
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      onInput={(event) =>
-                        setDraft(
-                          (event.currentTarget as HTMLTextAreaElement).value,
-                        )
-                      }
-                      placeholder="Ask Mochi..."
-                      rows={1}
-                      className={cn(
-                        "max-h-[4.875rem] min-h-11 resize-none rounded-[24px] border-0 bg-transparent px-4 py-3 text-sm font-extrabold text-[#2b2938] shadow-none outline-none transition placeholder:text-[#9d96ab] focus:bg-transparent focus:shadow-none",
-                        composerMultiline ? "w-full" : "flex-1",
-                      )}
-                    />
-                    {composerMultiline ? (
-                      <div className="flex items-end justify-end">
-                        <Button
-                          aria-label={
-                            sendMutation.isPending
-                              ? "Stop generating"
-                              : "Send message"
-                          }
-                          type={sendMutation.isPending ? "button" : "submit"}
-                          size="icon"
-                          onClick={
-                            sendMutation.isPending ? stopGeneration : undefined
-                          }
-                          disabled={
-                            !sendMutation.isPending &&
-                            (!conversationId ||
-                              hasUploadingAttachments ||
-                              hasFailedAttachments ||
-                              (!draft.trim() && !attachments.length))
-                          }
-                          className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
-                        >
-                          {sendMutation.isPending ? (
-                            <Square size={17} aria-hidden />
-                          ) : (
-                            <SendHorizonal size={19} aria-hidden />
-                          )}
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button
-                        aria-label={
-                          sendMutation.isPending
-                            ? "Stop generating"
-                            : "Send message"
-                        }
-                        type={sendMutation.isPending ? "button" : "submit"}
-                        size="icon"
-                        onClick={
-                          sendMutation.isPending ? stopGeneration : undefined
-                        }
-                        disabled={
-                          !sendMutation.isPending &&
-                          (!conversationId ||
-                            hasUploadingAttachments ||
-                            hasFailedAttachments ||
-                            (!draft.trim() && !attachments.length))
-                        }
-                        className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
-                      >
-                        {sendMutation.isPending ? (
-                          <Square size={17} aria-hidden />
-                        ) : (
-                          <SendHorizonal size={19} aria-hidden />
-                        )}
-                      </Button>
-                    )}
-                </div>
-                {voiceError && (
-                  <p className="px-3 pb-1 pt-2 text-xs font-extrabold text-[#9c4a61]">
-                    {voiceError}
-                  </p>
-                )}
-              </>
-            </form>
-          </div>
-            </div>
-          </div>
-        </div>
+        </>
       )}
-      <Sheet open={mediaSheetOpen} onOpenChange={setMediaSheetOpen}>
-        <MediaSourceSheet
-          onPickGallery={() => galleryInputRef.current?.click()}
-          onPickCamera={() => cameraInputRef.current?.click()}
-        />
-      </Sheet>
       <input
         ref={galleryInputRef}
         type="file"
@@ -1467,383 +1287,40 @@ export function ChatView() {
         className="hidden"
         onChange={(event) => onFilesSelected(event.target.files)}
       />
-      <Button
-        aria-label="Attach outfit image"
-        variant="secondary"
-        size="icon"
-        onClick={() => setMediaSheetOpen(true)}
-        className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 z-40 rounded-[24px] text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] md:left-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]"
-      >
-        <Camera size={19} aria-hidden />
-      </Button>
-      <Button
-        aria-label={
-          voiceActive ? "Live voice level" : "Start live voice chat"
-        }
-        variant={voiceActive ? "primary" : "secondary"}
-        size="icon"
-        onClick={
-          voiceActive
-            ? undefined
-            : () => {
-                void startVoiceSession();
-              }
-        }
-        className={cn(
-          "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-[5rem] z-40 rounded-full md:right-[max(5rem,calc((100vw-760px)/2+5rem))]",
-          voiceActive
-            ? "bg-[#302d43] text-white shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(42,39,55,0.24)] hover:bg-[#302d43]"
-            : "text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43]",
-        )}
-      >
-        {voiceActive && voiceStatus === "connecting" ? (
-          <LoaderCircle size={19} className="animate-spin" aria-hidden />
-        ) : voiceActive ? (
-          <MiniVoiceLevelMeter levels={voiceLevels} />
-        ) : (
-          <Mic size={19} aria-hidden />
-        )}
-      </Button>
-      {voiceActive ? (
-        <Button
-          aria-label="End live voice chat"
-          variant="danger"
-          size="icon"
-          onClick={() => stopVoiceSession()}
-          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full bg-[#b8324d] text-white shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(111,21,42,0.26)] hover:bg-[#9f2942] md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]"
-        >
-          <PhoneOff size={19} aria-hidden />
-        </Button>
-      ) : (
-        <Button
-          aria-label={chatPanelOpen ? "Close chat" : "Open chat"}
-          variant={chatPanelOpen ? "primary" : "secondary"}
-          size="icon"
-          onClick={() => setChatPanelOpen((open) => !open)}
-          className={cn(
-            "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]",
-            chatPanelOpen
-              ? "bg-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(42,39,55,0.24)] hover:bg-[#3d394f]"
-              : "text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43]",
-          )}
-        >
-          {chatPanelOpen ? (
-            <X size={19} aria-hidden />
-          ) : (
-            <MessageCircle size={19} aria-hidden />
-          )}
-        </Button>
-      )}
-    </AppChrome>
-  );
-}
-
-function MediaSourceSheet({
-  onPickGallery,
-  onPickCamera,
-}: {
-  onPickGallery: () => void;
-  onPickCamera: () => void;
-}) {
-  return (
-    <SheetContent
-      side="bottom"
-      showCloseButton={false}
-      className="rounded-t-[34px] border-white/70 bg-[#f7f6f8]/94 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[0_-20px_54px_rgba(47,45,58,0.16)] backdrop-blur-2xl"
-    >
-      <SheetTitle className="text-center font-display text-2xl font-semibold text-[#332f43]">
-        Add a look
-      </SheetTitle>
-      <SheetDescription className="sr-only">
-        Choose whether to upload an outfit image from the album or take a new
-        photo.
-      </SheetDescription>
-      <div className="mx-auto flex w-full max-w-[480px] flex-col gap-2">
-        <button
-          type="button"
-          onClick={onPickCamera}
-          className="flex h-14 items-center gap-3 rounded-[24px] border border-white/78 bg-white/66 px-4 text-left text-sm font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.92)_inset]"
-        >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-[18px] bg-[#e3e1e8]/78">
-            <Camera size={19} aria-hidden />
-          </span>
-          Take photo
-        </button>
-        <button
-          type="button"
-          onClick={onPickGallery}
-          className="flex h-14 items-center gap-3 rounded-[24px] border border-white/78 bg-white/66 px-4 text-left text-sm font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.92)_inset]"
-        >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-[18px] bg-[#e3e1e8]/78">
-            <Images size={19} aria-hidden />
-          </span>
-          Choose from album
-        </button>
-      </div>
-    </SheetContent>
-  );
-}
-
-function MiniVoiceLevelMeter({ levels }: { levels: number[] }) {
-  const visibleLevels = levels.slice(0, 4);
-
-  return (
-    <span className="flex h-6 items-center gap-0.5" aria-hidden>
-      {visibleLevels.map((level, index) => (
-        <span
-          key={index}
-          className="w-1 rounded-full bg-white/88 shadow-[0_0_10px_rgba(255,255,255,0.28)] transition-[height] duration-75"
-          style={{ height: `${Math.round(7 + level * 16)}px` }}
+      <MediaMenuLayer
+        open={mediaSheetOpen}
+        chatPanelOpen={textComposerOpen}
+        onClose={() => setMediaSheetOpen(false)}
+        onPickCamera={() => cameraInputRef.current?.click()}
+        onPickGallery={() => galleryInputRef.current?.click()}
+      />
+      {!chatPanelOpen && (
+        <StandaloneMediaButton
+          open={mediaSheetOpen}
+          onToggle={() => setMediaSheetOpen((open) => !open)}
         />
-      ))}
-    </span>
-  );
-}
-
-function getAudioContextCtor() {
-  return (
-    window.AudioContext ??
-    (window as unknown as { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext
-  );
-}
-
-function stopMediaStream(stream: MediaStream) {
-  stream.getTracks().forEach((track) => {
-    track.enabled = false;
-    track.stop();
-  });
-}
-
-function safeDisconnect(node: AudioNode) {
-  try {
-    node.disconnect();
-  } catch {
-    // Already disconnected.
-  }
-}
-
-function downsampleToPCM16(
-  input: Float32Array,
-  inputSampleRate: number,
-  targetSampleRate: number,
-): Uint8Array {
-  if (!input.length || inputSampleRate <= 0 || targetSampleRate <= 0) {
-    return new Uint8Array();
-  }
-  const ratio = Math.max(inputSampleRate / targetSampleRate, 1);
-  const outputLength = Math.floor(input.length / ratio);
-  const bytes = new Uint8Array(outputLength * 2);
-  const view = new DataView(bytes.buffer);
-
-  for (let index = 0; index < outputLength; index += 1) {
-    const start = Math.floor(index * ratio);
-    const end = Math.min(Math.floor((index + 1) * ratio), input.length);
-    let total = 0;
-    const count = Math.max(end - start, 1);
-
-    for (let sourceIndex = start; sourceIndex < end; sourceIndex += 1) {
-      total += input[sourceIndex] || 0;
-    }
-
-    const sample = Math.max(-1, Math.min(1, total / count));
-    view.setInt16(
-      index * 2,
-      sample < 0 ? sample * 0x8000 : sample * 0x7fff,
-      true,
-    );
-  }
-
-  return bytes;
-}
-
-function audioFrameMetrics(input: Float32Array): { rms: number; peak: number } {
-  if (!input.length) return { rms: 0, peak: 0 };
-  let sum = 0;
-  let peak = 0;
-
-  for (let index = 0; index < input.length; index += 1) {
-    const value = Math.abs(input[index] || 0);
-    sum += value * value;
-    if (value > peak) peak = value;
-  }
-
-  return { rms: Math.sqrt(sum / input.length), peak };
-}
-
-function base64PCMToFloat32(value: string, mimeType: string): Float32Array {
-  const bytes = base64ToBytes(value);
-  const sampleCount = Math.floor(bytes.byteLength / 2);
-  const samples = new Float32Array(sampleCount);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const littleEndian = !/audio\/l16/i.test(mimeType);
-
-  for (let index = 0; index < sampleCount; index += 1) {
-    samples[index] = Math.max(
-      -1,
-      Math.min(1, view.getInt16(index * 2, littleEndian) / 32768),
-    );
-  }
-
-  return samples;
-}
-
-function appendLiveTranscript(current: string, next: string): string {
-  const text = next.trim();
-  if (!text) return current;
-  if (!current) return text;
-  if (/^[，。！？,.!?;；:：]/.test(text)) return `${current}${text}`;
-  return `${current}${/[\s\n]$/.test(current) ? "" : " "}${text}`;
-}
-
-function mergeLiveTranscript(current: string, next: string): string {
-  const currentText = current.trim();
-  const nextText = next.trim();
-  if (!currentText) return nextText;
-  if (!nextText) return currentText;
-  if (nextText.startsWith(currentText)) return nextText;
-  if (currentText.startsWith(nextText)) return currentText;
-  return appendLiveTranscript(currentText, nextText);
-}
-
-function textsOverlap(current: string, next: string): boolean {
-  const currentText = current.trim();
-  const nextText = next.trim();
-  return (
-    Boolean(currentText && nextText) &&
-    (currentText === nextText ||
-      currentText.includes(nextText) ||
-      nextText.includes(currentText))
-  );
-}
-
-function WelcomeMessage() {
-  return (
-    <AgentBubble>
-      <MarkdownMessage content="Hi, I’m Mochi. Send me the outfit, the occasion, or the tiny doubt before you leave. I’ll help with taste, proportion, color, and expression, without pretending to be your doctor, therapist, lawyer, or life oracle." />
-    </AgentBubble>
-  );
-}
-
-function MessageItem({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
-  const hasContent = message.content.trim().length > 0;
-
-  if (!isUser) {
-    if (!hasContent) return null;
-
-    return (
-      <AgentBubble>
-        <MarkdownMessage content={message.content} />
-      </AgentBubble>
-    );
-  }
-
-  return (
-    <div className="flex justify-end">
-      <div
-        className={cn(
-          "max-w-[84%] overflow-hidden break-words rounded-[24px] px-3.5 py-2.5 text-sm font-bold leading-5 shadow-[0_14px_34px_rgba(38,36,52,0.14)] [overflow-wrap:anywhere]",
-          "bg-[#2c293d] text-white",
-          message.status === "failed" && "bg-[#8f334d]",
-        )}
-      >
-        {message.imageUrl && (
-          <div className="relative mb-2 aspect-[4/3] overflow-hidden rounded-[18px] bg-white/18">
-            {message.imageUrl.startsWith("blob:") ||
-            message.imageUrl.startsWith("data:") ||
-            message.imageUrl.startsWith("http") ? (
-              <Image
-                src={message.imageUrl}
-                alt="Uploaded outfit preview"
-                fill
-                sizes="(max-width: 768px) 72vw, 320px"
-                className="object-cover"
-                unoptimized
-              />
-            ) : (
-              <div className="flex h-full items-center px-3 py-2 text-xs">
-                Outfit image attached
-              </div>
-            )}
-          </div>
-        )}
-        {message.content}
-        {message.status === "failed" && (
-          <div className="mt-1 text-[0.68rem] font-extrabold uppercase tracking-wide text-white/70">
-            Not sent
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AgentBubble({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[88%] overflow-hidden break-words rounded-[24px] border border-white/72 bg-white/64 px-3.5 py-2.5 text-sm font-bold leading-5 text-[#343145] shadow-[0_1px_0_rgba(255,255,255,0.88)_inset,0_14px_34px_rgba(38,36,52,0.08)] backdrop-blur-xl [overflow-wrap:anywhere]">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function MarkdownMessage({ content }: { content: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkBreaks]}
-      components={{
-        p: ({ children }) => (
-          <p className="mb-2 text-[0.95rem] font-semibold leading-5 text-inherit last:mb-0">
-            {children}
-          </p>
-        ),
-        strong: ({ children }) => (
-          <strong className="font-extrabold text-[#242235]">{children}</strong>
-        ),
-        em: ({ children }) => (
-          <em className="font-semibold text-[#5f586f]">{children}</em>
-        ),
-        ul: ({ children }) => (
-          <ul className="mb-2 ml-5 list-disc space-y-1 text-[0.95rem] font-semibold leading-5 text-[#343145] last:mb-0">
-            {children}
-          </ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="mb-2 ml-5 list-decimal space-y-1 text-[0.95rem] font-semibold leading-5 text-[#343145] last:mb-0">
-            {children}
-          </ol>
-        ),
-        li: ({ children }) => <li className="pl-1">{children}</li>,
-        a: ({ children, href }) => (
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            className="font-extrabold text-[#157464] underline decoration-[#b6cbc8] underline-offset-4"
-          >
-            {children}
-          </a>
-        ),
-        blockquote: ({ children }) => (
-          <blockquote className="mb-3 border-l-4 border-[#cfc5d9] pl-3 text-[#5f586f] last:mb-0">
-            {children}
-          </blockquote>
-        ),
-        code: ({ children }) => (
-          <code className="rounded-md bg-white/68 px-1.5 py-0.5 text-[0.84rem] font-extrabold text-[#5f586f]">
-            {children}
-          </code>
-        ),
-        pre: ({ children }) => (
-          <pre className="mb-3 overflow-x-auto rounded-[18px] bg-[#2c293d] p-3 text-sm text-white last:mb-0">
-            {children}
-          </pre>
-        ),
-      }}
-    >
-      {content}
-    </ReactMarkdown>
+      )}
+      <BottomActionControls
+        chatPanelOpen={chatPanelOpen}
+        voiceActive={voiceActive}
+        voiceStatus={voiceStatus}
+        voiceLevels={voiceLevels}
+        sendControlActive={sendControlActive}
+        sendPending={sendMutation.isPending}
+        sendDisabled={
+          !sendMutation.isPending &&
+          (!conversationId || hasUploadingAttachments || hasFailedAttachments)
+        }
+        onSend={() => submit()}
+        onStopGeneration={stopGeneration}
+        onStartVoice={() => {
+          setChatPanelOpen(false);
+          void startVoiceSession();
+        }}
+        onStopVoice={() => stopVoiceSession()}
+        onOpenChat={() => setChatPanelOpen(true)}
+        onCloseChat={() => setChatPanelOpen(false)}
+      />
+    </AppChrome>
   );
 }
