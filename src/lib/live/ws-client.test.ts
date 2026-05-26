@@ -43,6 +43,19 @@ describe("Live WebSocket client helpers", () => {
     expect(url.pathname).toBe("/v1/closy/live/gemini/ws");
   });
 
+  it("keeps local websocket URLs on the current loopback host for cookies", () => {
+    window.history.pushState({}, "", "/chat");
+    const configuredHost =
+      window.location.hostname === "localhost" ? "127.0.0.1" : "localhost";
+    process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL =
+      `ws://${configuredHost}:9600/v1/closy/live/gemini/ws`;
+
+    const url = new URL(getLiveWebSocketUrl("mochi-session"));
+
+    expect(url.hostname).toBe(window.location.hostname);
+    expect(url.port).toBe("9600");
+  });
+
   it("prepares the server-set live cookie before connecting", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
     vi.stubGlobal("fetch", fetchMock);
