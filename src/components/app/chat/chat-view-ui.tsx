@@ -1,7 +1,8 @@
 "use client";
 
-import type { FormEvent, RefObject } from "react";
+import { useEffect, useState, type FormEvent, type RefObject } from "react";
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -523,24 +524,11 @@ function MessageItem({ message }: { message: ChatMessage }) {
         )}
       >
         {message.imageUrl && (
-          <div className="relative mb-2 aspect-[4/3] overflow-hidden rounded-[18px] bg-white/18">
-            {message.imageUrl.startsWith("blob:") ||
-            message.imageUrl.startsWith("data:") ||
-            message.imageUrl.startsWith("http") ? (
-              <Image
-                src={message.imageUrl}
-                alt="Uploaded outfit preview"
-                fill
-                sizes="(max-width: 768px) 72vw, 320px"
-                className="object-cover"
-                unoptimized
-              />
-            ) : (
-              <div className="flex h-full items-center px-3 py-2 text-xs">
-                Outfit image attached
-              </div>
-            )}
-          </div>
+          <ChatMessageImage
+            src={message.imageUrl}
+            alt="Uploaded outfit preview"
+            className="mb-2"
+          />
         )}
         {message.content}
         {message.status === "failed" && (
@@ -550,6 +538,112 @@ function MessageItem({ message }: { message: ChatMessage }) {
         )}
       </div>
     </div>
+  );
+}
+
+function isDisplayableChatImage(src: string) {
+  return (
+    src.startsWith("blob:") ||
+    src.startsWith("data:") ||
+    src.startsWith("http://") ||
+    src.startsWith("https://")
+  );
+}
+
+function ChatMessageImage({
+  src,
+  alt,
+  width = 220,
+  className,
+}: {
+  src: string;
+  alt: string;
+  width?: number;
+  className?: string;
+}) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  if (!isDisplayableChatImage(src)) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-24 items-center rounded-[18px] bg-white/18 px-3 py-2 text-xs",
+          className,
+        )}
+        style={{ width, maxWidth: "100%" }}
+      >
+        Outfit image attached
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Open image preview"
+        onClick={() => setPreviewOpen(true)}
+        className={cn(
+          "block overflow-hidden rounded-[18px] bg-white/18 text-left",
+          className,
+        )}
+        style={{ width, maxWidth: "100%" }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={alt}
+          className="block h-auto max-w-full"
+          style={{ width: "100%" }}
+        />
+      </button>
+      {previewOpen && (
+        <ChatImagePreviewOverlay
+          src={src}
+          alt={alt}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function ChatImagePreviewOverlay({
+  src,
+  alt,
+  onClose,
+}: {
+  src: string;
+  alt: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Image preview"
+      tabIndex={-1}
+      onClick={onClose}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/82 p-4 backdrop-blur-sm"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        className="max-h-[88vh] max-w-[92vw] object-contain"
+        onClick={onClose}
+      />
+    </div>,
+    document.body,
   );
 }
 

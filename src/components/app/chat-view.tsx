@@ -88,6 +88,7 @@ export function ChatView() {
   const liveSessionGenerationRef = useRef(0);
   const liveCaptureGenerationRef = useRef(0);
   const liveSentMediaIdsRef = useRef<Set<string>>(new Set());
+  const livePendingMediaAttachmentsRef = useRef<PendingAttachment[]>([]);
   const liveAssistantMessageIdRef = useRef<string | null>(null);
   const liveUserMessageIdRef = useRef<string | null>(null);
   const liveLastUserTranscriptRef = useRef("");
@@ -437,6 +438,9 @@ export function ChatView() {
       analyserRef.current = null;
       liveUserMessageIdRef.current = null;
       liveLastUserTranscriptRef.current = "";
+      if (resetState) {
+        livePendingMediaAttachmentsRef.current = [];
+      }
 
       void captureAudioContextRef.current?.close().catch(() => undefined);
       captureAudioContextRef.current = null;
@@ -461,12 +465,17 @@ export function ChatView() {
     (attachment: PendingAttachment) => {
       const socket = liveSocketRef.current;
       if (
+        attachment.media_id &&
+        liveSentMediaIdsRef.current.has(attachment.media_id)
+      ) {
+        return true;
+      }
+      if (
         !attachment.media_id ||
         attachment.uploadStatus !== "ready" ||
-        liveSentMediaIdsRef.current.has(attachment.media_id) ||
         socket?.readyState !== WebSocket.OPEN
       ) {
-        return;
+        return false;
       }
       liveSentMediaIdsRef.current.add(attachment.media_id);
       socket.send(
@@ -481,9 +490,32 @@ export function ChatView() {
           turn_complete: false,
         }),
       );
+      return true;
     },
     [],
   );
+
+  const sendOrQueueLiveMediaAttachment = useCallback(
+    (attachment: PendingAttachment) => {
+      if (sendLiveMediaAttachment(attachment)) return;
+      if (!attachment.media_id || attachment.uploadStatus !== "ready") return;
+
+      const alreadyQueued = livePendingMediaAttachmentsRef.current.some(
+        (item) => item.media_id === attachment.media_id,
+      );
+      if (!alreadyQueued) {
+        livePendingMediaAttachmentsRef.current.push(attachment);
+      }
+    },
+    [sendLiveMediaAttachment],
+  );
+
+  const flushQueuedLiveMediaAttachments = useCallback(() => {
+    livePendingMediaAttachmentsRef.current =
+      livePendingMediaAttachmentsRef.current.filter(
+        (attachment) => !sendLiveMediaAttachment(attachment),
+      );
+  }, [sendLiveMediaAttachment]);
 
   const startLiveCapture = useCallback(
     async (socket: WebSocket, generation: number) => {
@@ -676,6 +708,7 @@ export function ChatView() {
       if (resetReconnect) {
         liveReconnectAttemptRef.current = 0;
         liveSentMediaIdsRef.current.clear();
+        livePendingMediaAttachmentsRef.current = [];
       }
       setVoiceError("");
       setVoiceStatus("connecting");
@@ -747,7 +780,8 @@ export function ChatView() {
           }
           if (eventType === "live_setup_complete") {
             void startLiveCapture(socket, generation).then(() => {
-              attachments.forEach(sendLiveMediaAttachment);
+              attachments.forEach(sendOrQueueLiveMediaAttachment);
+              flushQueuedLiveMediaAttachments();
             });
             return;
           }
@@ -878,7 +912,8 @@ export function ChatView() {
       finishLiveUserTranscript,
       finalizeLiveAssistantMessage,
       playLiveAudio,
-      sendLiveMediaAttachment,
+      flushQueuedLiveMediaAttachments,
+      sendOrQueueLiveMediaAttachment,
       sessionId,
       startLiveCapture,
       stopLivePlayback,
@@ -1141,7 +1176,9 @@ export function ChatView() {
           uploadStatus: "uploading",
         };
 
-        setAttachments((current) => [...current, pendingAttachment]);
+        if (!voiceActive) {
+          setAttachments((current) => [...current, pendingAttachment]);
+        }
 
         void apiClient
           .uploadAttachment(file)
@@ -1153,14 +1190,30 @@ export function ChatView() {
               mimeType: uploaded.mimeType ?? pendingAttachment.mimeType,
               uploadStatus: "ready",
             };
+            if (voiceActive) {
+              sendOrQueueLiveMediaAttachment(readyAttachment);
+              if (readyAttachment.previewUrl) {
+                URL.revokeObjectURL(readyAttachment.previewUrl);
+                attachmentUrlsRef.current.delete(readyAttachment.previewUrl);
+              }
+              return;
+            }
+
             setAttachments((current) =>
               current.map((attachment) =>
                 attachment.localId === localId ? readyAttachment : attachment,
               ),
             );
-            sendLiveMediaAttachment(readyAttachment);
           })
           .catch((error: unknown) => {
+            if (voiceActive) {
+              if (previewUrl) {
+                URL.revokeObjectURL(previewUrl);
+                attachmentUrlsRef.current.delete(previewUrl);
+              }
+              return;
+            }
+
             setAttachments((current) =>
               current.map((attachment) =>
                 attachment.localId === localId
