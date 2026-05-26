@@ -42,15 +42,6 @@ export const styleIntents: Array<{
   },
 ];
 
-export const starterPrompts = [
-  "Does this outfit work for today?",
-  "Help me choose between A and B.",
-  "Should I buy this piece or skip it?",
-  "I want to switch up my style.",
-  "Quick check before I go out.",
-  "I feel low-energy. What can I wear that still feels like me?",
-];
-
 export const homeActions = [
   {
     href: "/chat",

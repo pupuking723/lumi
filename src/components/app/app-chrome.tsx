@@ -37,11 +37,13 @@ export function AppChrome({
   children,
   contentScroll = false,
   fixedViewport = false,
+  showPageTitle = true,
   mainClassName,
 }: {
   children: React.ReactNode;
   contentScroll?: boolean;
   fixedViewport?: boolean;
+  showPageTitle?: boolean;
   mainClassName?: string;
 }) {
   const pathname = usePathname();
@@ -148,9 +150,11 @@ export function AppChrome({
                 </div>
                 <GoogleAuthButton compact />
               </div>
-              <p className="mt-1 text-sm font-extrabold text-[#5f586f] md:mt-0">
-                {title}
-              </p>
+              {showPageTitle && (
+                <p className="mt-1 text-sm font-extrabold text-[#5f586f] md:mt-0">
+                  {title}
+                </p>
+              )}
             </div>
           </header>
 

@@ -45,6 +45,7 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${fraunces.variable} ${nunito.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className="min-h-full">
         <Providers>{children}</Providers>

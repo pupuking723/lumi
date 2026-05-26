@@ -4,10 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:custom": "node server.mjs",
     "build": "next build",
     "start": "next start",
-    "start:custom": "NODE_ENV=production node server.mjs",
     "lint": "eslint",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

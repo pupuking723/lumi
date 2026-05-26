@@ -16,15 +16,15 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
   Check,
-  Copy,
   Camera,
   Images,
+  LoaderCircle,
+  MessageCircle,
   Mic,
   PhoneOff,
   SendHorizonal,
   Square,
-  ThumbsDown,
-  ThumbsUp,
+  X,
 } from "lucide-react";
 import { AppChrome } from "./app-chrome";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,6 @@ import {
 } from "@/components/ui/sheet";
 import { apiClient } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
-import { starterPrompts } from "@/lib/data/mochi";
 import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
 import {
   base64ToBytes,
@@ -112,6 +111,7 @@ export function ChatView() {
   const [draft, setDraft] = useState("");
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
+  const [chatPanelOpen, setChatPanelOpen] = useState(true);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [sessionId, setSessionId] = useState(() =>
     typeof window === "undefined" ? "" : getOrCreateMochiSessionId(),
@@ -1038,10 +1038,10 @@ export function ChatView() {
       (Number.parseFloat(styles.paddingTop) || 0) +
       (Number.parseFloat(styles.paddingBottom) || 0);
     const singleLineHeight = lineHeight + paddingY;
-    const maxHeight = 112;
+    const maxHeight = lineHeight * 3 + paddingY;
     const composerWidth =
       composerBodyRef.current?.clientWidth ?? input.clientWidth;
-    const inlineDraftWidth = Math.max(80, composerWidth - 44 * 3 - 8 * 3);
+    const inlineDraftWidth = Math.max(80, composerWidth - 44 - 8);
     const previousWidth = input.style.width;
 
     input.style.width = `${inlineDraftWidth}px`;
@@ -1219,92 +1219,55 @@ export function ChatView() {
   return (
     <AppChrome
       fixedViewport
-      mainClassName="flex min-h-0 flex-col overflow-hidden !pb-0"
+      showPageTitle={false}
+      mainClassName="relative min-h-0 overflow-hidden !p-0"
     >
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <section
-          ref={messageScrollRef}
-          className="scrollbar-pearl min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-3 pr-1 [-webkit-overflow-scrolling:touch]"
+      {chatPanelOpen && (
+        <div
+          className={cn(
+            "fixed right-4 bottom-[calc(5.1rem+env(safe-area-inset-bottom))] z-20 flex h-[66.666dvh] w-[66.666vw] max-w-[520px] flex-col overflow-hidden rounded-[24px] border border-white/82 bg-[#fbfafc]/78 p-3 shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_24px_70px_rgba(42,39,55,0.2)] backdrop-blur-2xl md:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] md:right-[max(1rem,calc((100vw-760px)/2+1rem))]",
+            voiceActive && "bg-[#b8324d]/12",
+          )}
         >
-          <div className="flex flex-col gap-3">
-            {messages.length === 0 && <WelcomeMessage />}
-            {messages.map((message) => (
-              <MessageItem key={message.id} message={message} />
-            ))}
-            {!sendMutation.isPending && (
-              <PromptSuggestions
-                onSelect={(prompt) => setDraft(prompt)}
-                hidden={messages.at(-1)?.role === "user"}
-              />
-            )}
-            {showPendingIndicator && (
-              <div className="lumi-fade-in max-w-full px-1 py-2 text-[#343145]">
-                <AgentMessageHeader />
-                <span className="thinking-text-wave text-sm font-bold">
-                  stitching a thought
-                </span>
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <section
+              ref={messageScrollRef}
+              className="scrollbar-pearl min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-3 pr-1 [-webkit-overflow-scrolling:touch]"
+            >
+              <div className="flex flex-col gap-3">
+                {messages.length === 0 && <WelcomeMessage />}
+                {messages.map((message) => (
+                  <MessageItem key={message.id} message={message} />
+                ))}
+                {showPendingIndicator && (
+                  <div className="lumi-fade-in max-w-full px-1 py-2 text-[#343145]">
+                    <span className="thinking-text-wave text-sm font-bold">
+                      stitching a thought
+                    </span>
+                  </div>
+                )}
+                {sendMutation.isError && !lastSendStopped && (
+                  <div className="lumi-fade-in rounded-[22px] border border-[#ead1d8] bg-[#fff3f5]/86 p-3 text-sm font-bold text-[#9c4a61] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] backdrop-blur-xl">
+                    The thread snagged.{" "}
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={() => lastPayload && submit(lastPayload)}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-            {sendMutation.isError && !lastSendStopped && (
-              <div className="lumi-fade-in rounded-[22px] border border-[#ead1d8] bg-[#fff3f5]/86 p-3 text-sm font-bold text-[#9c4a61] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] backdrop-blur-xl">
-                The thread snagged.{" "}
-                <button
-                  type="button"
-                  className="underline"
-                  onClick={() => lastPayload && submit(lastPayload)}
-                >
-                  Retry
-                </button>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <div className="shrink-0 pb-[calc(0.85rem+env(safe-area-inset-bottom))] pt-2 md:pb-6">
-          <div className="mx-auto w-full max-w-[480px] md:max-w-none">
+            </section>
+            <div className="shrink-0 pt-2">
+          <div className="w-full">
             <form
               onSubmit={onSubmit}
-              className={cn(
-                "w-full rounded-[34px] border border-white/82 bg-[#fbfafc]/76 p-2 shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_22px_58px_rgba(42,39,55,0.18)] backdrop-blur-2xl",
-                voiceActive &&
-                  "border-[#ffb0bd]/42 bg-[#b8324d]/92 shadow-[0_1px_0_rgba(255,255,255,0.24)_inset,0_22px_58px_rgba(111,21,42,0.28)]",
-              )}
+              className="w-full rounded-[24px] border border-white/82 bg-[#fbfafc]/76 p-2 shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_22px_58px_rgba(42,39,55,0.18)] backdrop-blur-2xl"
             >
-              {voiceActive ? (
-                <button
-                  type="button"
-                  aria-label="End live voice chat"
-                  onClick={() => stopVoiceSession()}
-                  className="flex h-16 w-full items-center justify-between gap-3 rounded-[28px] bg-[#b8324d] px-4 text-left text-white shadow-[0_1px_0_rgba(255,255,255,0.2)_inset]"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-white/16">
-                      <PhoneOff size={20} aria-hidden />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-black">
-                        {voiceStatus === "connecting"
-                          ? "Live connecting"
-                          : voiceStatus === "speaking"
-                            ? "Listening to you"
-                            : voiceStatus === "thinking"
-                              ? "Mochi is thinking"
-                              : voiceStatus === "responding"
-                                ? "Mochi is responding"
-                                : voiceStatus === "error"
-                                  ? "Live paused"
-                                  : "Live listening"}
-                      </span>
-                      <span className="block truncate text-xs font-extrabold text-white/72">
-                        {voiceError || "Tap to hang up"}
-                      </span>
-                    </span>
-                  </span>
-                  <VoiceLevelMeter levels={voiceLevels} />
-                </button>
-              ) : (
-                <>
-                  {attachments.length > 0 && (
+              <>
+                {attachments.length > 0 && (
                     <div className="mb-2 space-y-2">
                       {attachments.map((attachment) => (
                         <div
@@ -1353,46 +1316,14 @@ export function ChatView() {
                         </div>
                       ))}
                     </div>
-                  )}
-                  <Sheet open={mediaSheetOpen} onOpenChange={setMediaSheetOpen}>
-                    <MediaSourceSheet
-                      onPickGallery={() => galleryInputRef.current?.click()}
-                      onPickCamera={() => cameraInputRef.current?.click()}
-                    />
-                  </Sheet>
-                  <div
+                )}
+                <div
                     ref={composerBodyRef}
                     className={cn(
                       "gap-2",
                       composerMultiline ? "flex flex-col" : "flex items-end",
                     )}
                   >
-                    <input
-                      ref={galleryInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(event) => onFilesSelected(event.target.files)}
-                    />
-                    <input
-                      ref={cameraInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={(event) => onFilesSelected(event.target.files)}
-                    />
-                    {!composerMultiline && (
-                      <Button
-                        aria-label="Attach outfit image"
-                        variant="secondary"
-                        size="icon"
-                        onClick={() => setMediaSheetOpen(true)}
-                        className="rounded-[24px] text-[#302d43]"
-                      >
-                        <Camera size={19} aria-hidden />
-                      </Button>
-                    )}
                     <textarea
                       ref={draftInputRef}
                       value={draft}
@@ -1405,76 +1336,12 @@ export function ChatView() {
                       placeholder="Ask Mochi..."
                       rows={1}
                       className={cn(
-                        "max-h-28 min-h-11 resize-none rounded-[24px] border border-white/82 bg-[#f6f5f7]/68 px-4 py-3 text-sm font-extrabold text-[#2b2938] shadow-[0_1px_0_rgba(255,255,255,0.86)_inset] outline-none transition focus:border-white focus:bg-white/32 focus:shadow-[0_1px_0_rgba(255,255,255,0.96)_inset,0_0_0_1px_rgba(255,255,255,0.55)] placeholder:text-[#9d96ab]",
+                        "max-h-[4.875rem] min-h-11 resize-none rounded-[24px] border-0 bg-transparent px-4 py-3 text-sm font-extrabold text-[#2b2938] shadow-none outline-none transition placeholder:text-[#9d96ab] focus:bg-transparent focus:shadow-none",
                         composerMultiline ? "w-full" : "flex-1",
                       )}
                     />
                     {composerMultiline ? (
-                      <div className="flex items-end justify-between gap-2">
-                        <Button
-                          aria-label="Attach outfit image"
-                          variant="secondary"
-                          size="icon"
-                          onClick={() => setMediaSheetOpen(true)}
-                          className="rounded-[24px] text-[#302d43]"
-                        >
-                          <Camera size={19} aria-hidden />
-                        </Button>
-                        <div className="flex items-end gap-2">
-                          <Button
-                            aria-label="Start live voice chat"
-                            variant="secondary"
-                            size="icon"
-                            onClick={() => {
-                              void startVoiceSession();
-                            }}
-                            className="rounded-full text-[#5f586f] hover:text-[#302d43]"
-                          >
-                            <Mic size={19} aria-hidden />
-                          </Button>
-                          <Button
-                            aria-label={
-                              sendMutation.isPending
-                                ? "Stop generating"
-                                : "Send message"
-                            }
-                            type={sendMutation.isPending ? "button" : "submit"}
-                            size="icon"
-                            onClick={
-                              sendMutation.isPending
-                                ? stopGeneration
-                                : undefined
-                            }
-                            disabled={
-                              !sendMutation.isPending &&
-                              (!conversationId ||
-                                hasUploadingAttachments ||
-                                hasFailedAttachments ||
-                                (!draft.trim() && !attachments.length))
-                            }
-                            className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
-                          >
-                            {sendMutation.isPending ? (
-                              <Square size={17} aria-hidden />
-                            ) : (
-                              <SendHorizonal size={19} aria-hidden />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <Button
-                          aria-label="Start live voice chat"
-                          variant="secondary"
-                          size="icon"
-                          onClick={() => {
-                            void startVoiceSession();
-                          }}
-                          className="rounded-full text-[#5f586f] hover:text-[#302d43]"
-                        >
-                          <Mic size={19} aria-hidden />
-                        </Button>
+                      <div className="flex items-end justify-end">
                         <Button
                           aria-label={
                             sendMutation.isPending
@@ -1501,20 +1368,136 @@ export function ChatView() {
                             <SendHorizonal size={19} aria-hidden />
                           )}
                         </Button>
-                      </>
+                      </div>
+                    ) : (
+                      <Button
+                        aria-label={
+                          sendMutation.isPending
+                            ? "Stop generating"
+                            : "Send message"
+                        }
+                        type={sendMutation.isPending ? "button" : "submit"}
+                        size="icon"
+                        onClick={
+                          sendMutation.isPending ? stopGeneration : undefined
+                        }
+                        disabled={
+                          !sendMutation.isPending &&
+                          (!conversationId ||
+                            hasUploadingAttachments ||
+                            hasFailedAttachments ||
+                            (!draft.trim() && !attachments.length))
+                        }
+                        className="rounded-full bg-[#302d43] hover:bg-[#3d394f]"
+                      >
+                        {sendMutation.isPending ? (
+                          <Square size={17} aria-hidden />
+                        ) : (
+                          <SendHorizonal size={19} aria-hidden />
+                        )}
+                      </Button>
                     )}
-                  </div>
-                  {voiceError && (
-                    <p className="px-3 pb-1 pt-2 text-xs font-extrabold text-[#9c4a61]">
-                      {voiceError}
-                    </p>
-                  )}
-                </>
-              )}
+                </div>
+                {voiceError && (
+                  <p className="px-3 pb-1 pt-2 text-xs font-extrabold text-[#9c4a61]">
+                    {voiceError}
+                  </p>
+                )}
+              </>
             </form>
           </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+      <Sheet open={mediaSheetOpen} onOpenChange={setMediaSheetOpen}>
+        <MediaSourceSheet
+          onPickGallery={() => galleryInputRef.current?.click()}
+          onPickCamera={() => cameraInputRef.current?.click()}
+        />
+      </Sheet>
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => onFilesSelected(event.target.files)}
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(event) => onFilesSelected(event.target.files)}
+      />
+      <Button
+        aria-label="Attach outfit image"
+        variant="secondary"
+        size="icon"
+        onClick={() => setMediaSheetOpen(true)}
+        className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 z-40 rounded-[24px] text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] md:left-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]"
+      >
+        <Camera size={19} aria-hidden />
+      </Button>
+      <Button
+        aria-label={
+          voiceActive ? "Live voice level" : "Start live voice chat"
+        }
+        variant={voiceActive ? "primary" : "secondary"}
+        size="icon"
+        onClick={
+          voiceActive
+            ? undefined
+            : () => {
+                void startVoiceSession();
+              }
+        }
+        className={cn(
+          "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-[5rem] z-40 rounded-full md:right-[max(5rem,calc((100vw-760px)/2+5rem))]",
+          voiceActive
+            ? "bg-[#302d43] text-white shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(42,39,55,0.24)] hover:bg-[#302d43]"
+            : "text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43]",
+        )}
+      >
+        {voiceActive && voiceStatus === "connecting" ? (
+          <LoaderCircle size={19} className="animate-spin" aria-hidden />
+        ) : voiceActive ? (
+          <MiniVoiceLevelMeter levels={voiceLevels} />
+        ) : (
+          <Mic size={19} aria-hidden />
+        )}
+      </Button>
+      {voiceActive ? (
+        <Button
+          aria-label="End live voice chat"
+          variant="danger"
+          size="icon"
+          onClick={() => stopVoiceSession()}
+          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full bg-[#b8324d] text-white shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(111,21,42,0.26)] hover:bg-[#9f2942] md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]"
+        >
+          <PhoneOff size={19} aria-hidden />
+        </Button>
+      ) : (
+        <Button
+          aria-label={chatPanelOpen ? "Close chat" : "Open chat"}
+          variant={chatPanelOpen ? "primary" : "secondary"}
+          size="icon"
+          onClick={() => setChatPanelOpen((open) => !open)}
+          className={cn(
+            "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]",
+            chatPanelOpen
+              ? "bg-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(42,39,55,0.24)] hover:bg-[#3d394f]"
+              : "text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43]",
+          )}
+        >
+          {chatPanelOpen ? (
+            <X size={19} aria-hidden />
+          ) : (
+            <MessageCircle size={19} aria-hidden />
+          )}
+        </Button>
+      )}
     </AppChrome>
   );
 }
@@ -1565,14 +1548,16 @@ function MediaSourceSheet({
   );
 }
 
-function VoiceLevelMeter({ levels }: { levels: number[] }) {
+function MiniVoiceLevelMeter({ levels }: { levels: number[] }) {
+  const visibleLevels = levels.slice(0, 4);
+
   return (
-    <span className="flex h-10 shrink-0 items-center gap-1.5" aria-hidden>
-      {levels.map((level, index) => (
+    <span className="flex h-6 items-center gap-0.5" aria-hidden>
+      {visibleLevels.map((level, index) => (
         <span
           key={index}
-          className="w-1.5 rounded-full bg-white/86 shadow-[0_0_16px_rgba(255,255,255,0.25)] transition-[height] duration-75"
-          style={{ height: `${Math.round(10 + level * 30)}px` }}
+          className="w-1 rounded-full bg-white/88 shadow-[0_0_10px_rgba(255,255,255,0.28)] transition-[height] duration-75"
+          style={{ height: `${Math.round(7 + level * 16)}px` }}
         />
       ))}
     </span>
@@ -1696,76 +1681,25 @@ function textsOverlap(current: string, next: string): boolean {
   );
 }
 
-function PromptSuggestions({
-  hidden,
-  onSelect,
-}: {
-  hidden: boolean;
-  onSelect: (prompt: string) => void;
-}) {
-  if (hidden) return null;
-
-  return (
-    <div className="lumi-fade-in flex flex-wrap gap-2 px-1 pt-1">
-      {starterPrompts.slice(0, 6).map((prompt) => (
-        <button
-          key={prompt}
-          type="button"
-          onClick={() => onSelect(prompt)}
-          className="rounded-full border border-white/82 bg-[#fbfafc]/58 px-3 py-2 text-left text-xs font-extrabold text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset] backdrop-blur-xl transition hover:bg-white/76 hover:text-[#2b2938]"
-        >
-          {prompt}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function WelcomeMessage() {
   return (
-    <div className="max-w-full px-1 py-2 text-[#343145]">
-      <AgentMessageHeader />
+    <AgentBubble>
       <MarkdownMessage content="Hi, I’m Mochi. Send me the outfit, the occasion, or the tiny doubt before you leave. I’ll help with taste, proportion, color, and expression, without pretending to be your doctor, therapist, lawyer, or life oracle." />
-    </div>
-  );
-}
-
-function AgentMessageHeader() {
-  return (
-    <div className="mb-3 flex items-center gap-2.5 text-base font-extrabold leading-none text-[#716a7e]">
-      <Image
-        src="/mochi/mochi-avatar.webp"
-        alt=""
-        width={36}
-        height={36}
-        sizes="36px"
-        className="h-9 w-9 rounded-full object-cover shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_3px_12px_rgba(70,61,92,0.18)]"
-        aria-hidden
-      />
-      Mochi
-    </div>
+    </AgentBubble>
   );
 }
 
 function MessageItem({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   const hasContent = message.content.trim().length > 0;
-  const canShowActions = hasContent && message.status === "sent";
 
   if (!isUser) {
     if (!hasContent) return null;
 
     return (
-      <div className="max-w-full px-1 py-2 text-[#343145]">
-        <AgentMessageHeader />
+      <AgentBubble>
         <MarkdownMessage content={message.content} />
-        {canShowActions && (
-          <AgentMessageActions
-            content={message.content}
-            messageId={message.id}
-          />
-        )}
-      </div>
+      </AgentBubble>
     );
   }
 
@@ -1773,7 +1707,7 @@ function MessageItem({ message }: { message: ChatMessage }) {
     <div className="flex justify-end">
       <div
         className={cn(
-          "max-w-[84%] rounded-[25px] px-4 py-3 text-sm font-bold leading-6 shadow-[0_14px_34px_rgba(38,36,52,0.14)]",
+          "max-w-[84%] overflow-hidden break-words rounded-[24px] px-3.5 py-2.5 text-sm font-bold leading-5 shadow-[0_14px_34px_rgba(38,36,52,0.14)] [overflow-wrap:anywhere]",
           "bg-[#2c293d] text-white",
           message.status === "failed" && "bg-[#8f334d]",
         )}
@@ -1809,81 +1743,12 @@ function MessageItem({ message }: { message: ChatMessage }) {
   );
 }
 
-type FeedbackState = "liked" | "disliked" | null;
-
-function AgentMessageActions({
-  content,
-  messageId,
-}: {
-  content: string;
-  messageId: string;
-}) {
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<FeedbackState>(null);
-  const copied = copiedId === messageId;
-
-  const copyMessage = async () => {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(content);
-    } else {
-      const textArea = document.createElement("textarea");
-      textArea.value = content;
-      textArea.style.position = "fixed";
-      textArea.style.left = "-9999px";
-      document.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      document.execCommand("copy");
-      textArea.remove();
-    }
-    setCopiedId(messageId);
-    window.setTimeout(() => setCopiedId(null), 1600);
-  };
-
+function AgentBubble({ children }: { children: React.ReactNode }) {
   return (
-    <div className="lumi-fade-in mt-2 flex items-center gap-1.5 text-[#81798e]">
-      <button
-        type="button"
-        onClick={copyMessage}
-        className="inline-flex size-8 items-center justify-center rounded-full transition hover:text-[#2b2938]"
-        aria-label={copied ? "Copied" : "Copy agent message"}
-      >
-        {copied ? (
-          <Check size={14} aria-hidden />
-        ) : (
-          <Copy size={14} aria-hidden />
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          setFeedback((current) => (current === "liked" ? null : "liked"))
-        }
-        className="inline-flex size-8 items-center justify-center rounded-full transition hover:text-[#2b2938]"
-        aria-label="Like agent message"
-        aria-pressed={feedback === "liked"}
-      >
-        <ThumbsUp
-          size={15}
-          aria-hidden
-          fill={feedback === "liked" ? "currentColor" : "none"}
-        />
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          setFeedback((current) => (current === "disliked" ? null : "disliked"))
-        }
-        className="inline-flex size-8 items-center justify-center rounded-full transition hover:text-[#2b2938]"
-        aria-label="Dislike agent message"
-        aria-pressed={feedback === "disliked"}
-      >
-        <ThumbsDown
-          size={15}
-          aria-hidden
-          fill={feedback === "disliked" ? "currentColor" : "none"}
-        />
-      </button>
+    <div className="flex justify-start">
+      <div className="max-w-[88%] overflow-hidden break-words rounded-[24px] border border-white/72 bg-white/64 px-3.5 py-2.5 text-sm font-bold leading-5 text-[#343145] shadow-[0_1px_0_rgba(255,255,255,0.88)_inset,0_14px_34px_rgba(38,36,52,0.08)] backdrop-blur-xl [overflow-wrap:anywhere]">
+        {children}
+      </div>
     </div>
   );
 }
@@ -1894,7 +1759,7 @@ function MarkdownMessage({ content }: { content: string }) {
       remarkPlugins={[remarkGfm, remarkBreaks]}
       components={{
         p: ({ children }) => (
-          <p className="mb-3 text-[0.95rem] font-semibold leading-7 text-[#343145] last:mb-0">
+          <p className="mb-2 text-[0.95rem] font-semibold leading-5 text-inherit last:mb-0">
             {children}
           </p>
         ),
@@ -1905,12 +1770,12 @@ function MarkdownMessage({ content }: { content: string }) {
           <em className="font-semibold text-[#5f586f]">{children}</em>
         ),
         ul: ({ children }) => (
-          <ul className="mb-3 ml-5 list-disc space-y-1 text-[0.95rem] font-semibold leading-7 text-[#343145] last:mb-0">
+          <ul className="mb-2 ml-5 list-disc space-y-1 text-[0.95rem] font-semibold leading-5 text-[#343145] last:mb-0">
             {children}
           </ul>
         ),
         ol: ({ children }) => (
-          <ol className="mb-3 ml-5 list-decimal space-y-1 text-[0.95rem] font-semibold leading-7 text-[#343145] last:mb-0">
+          <ol className="mb-2 ml-5 list-decimal space-y-1 text-[0.95rem] font-semibold leading-5 text-[#343145] last:mb-0">
             {children}
           </ol>
         ),

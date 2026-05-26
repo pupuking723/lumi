@@ -54,6 +54,7 @@ function HeroSection() {
         alt="Mochi in a dreamy fashion closet"
         fill
         priority
+        unoptimized
         sizes="100vw"
         className="absolute inset-0 -z-20 object-cover object-[50%_42%] md:object-[50%_40%]"
       />
@@ -210,6 +211,7 @@ function FeatureFrame({
           src={feature.image}
           alt={`${feature.title} illustration`}
           fill
+          unoptimized
           sizes="(max-width: 768px) 92vw, 620px"
           className={cn("object-cover", feature.crop)}
         />
