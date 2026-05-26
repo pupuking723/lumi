@@ -25,8 +25,7 @@ export interface LiveServerEvent {
 
 export function getLiveWebSocketUrl(sessionId: string) {
   const endpoint =
-    process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL ??
-    process.env.NEXT_PUBLIC_LUMI_LIVE_WS_PATH ?? "/api/live/gemini/ws";
+    process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL ?? defaultLiveWebSocketEndpoint();
 
   const url = new URL(endpoint, window.location.href);
   if (url.protocol === "http:" || url.protocol === "https:") {
@@ -44,6 +43,11 @@ export function getLiveWebSocketUrl(sessionId: string) {
 
   url.searchParams.set("session_id", sessionId);
   return url.toString();
+}
+
+function defaultLiveWebSocketEndpoint() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.hostname}:9600/v1/closy/live/gemini/ws`;
 }
 
 function isLoopbackHost(hostname: string) {

@@ -32,10 +32,10 @@ RUN pnpm install --prod --frozen-lockfile \
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --chown=nextjs:nodejs server.mjs next.config.ts ./
+COPY --chown=nextjs:nodejs next.config.ts ./
 
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["node", "server.mjs"]
+CMD ["pnpm", "start"]
