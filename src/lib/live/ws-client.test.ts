@@ -10,15 +10,16 @@ import {
 describe("Live WebSocket client helpers", () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL;
-    delete process.env.NEXT_PUBLIC_LUMI_LIVE_WS_PATH;
     delete process.env.NEXT_PUBLIC_LUMI_LIVE_SESSION_PATH;
   });
 
-  it("builds a same-origin websocket URL with the session id", () => {
+  it("builds a direct GoClaw websocket URL with the session id", () => {
     window.history.pushState({}, "", "/chat");
 
     const url = new URL(getLiveWebSocketUrl("mochi-session"));
-    expect(url.pathname).toBe("/api/live/gemini/ws");
+    expect(url.hostname).toBe(window.location.hostname);
+    expect(url.port).toBe("9600");
+    expect(url.pathname).toBe("/v1/closy/live/gemini/ws");
     expect(url.searchParams.get("session_id")).toBe("mochi-session");
     expect(["ws:", "wss:"]).toContain(url.protocol);
   });
