@@ -41,7 +41,10 @@ export interface LumiApiClient {
   ) => Promise<UserProfile>;
   listConversations: () => Promise<MochiConversation[]>;
   createConversation: () => Promise<MochiConversation>;
-  listMessages: (conversationId: string) => Promise<ChatMessage[]>;
+  listMessages: (
+    conversationId: string,
+    sessionId?: string,
+  ) => Promise<ChatMessage[]>;
   uploadAttachment: (file: File) => Promise<UploadedAttachment>;
   sendMessage: (
     conversationId: string,
@@ -57,6 +60,7 @@ export interface LumiApiClient {
 export function createLumiApiClient(): LumiApiClient {
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
   const chatProxyPath = process.env.NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH;
+  const messagesProxyPath = process.env.NEXT_PUBLIC_LUMI_MESSAGES_PROXY_PATH;
   const uploadProxyPath = process.env.NEXT_PUBLIC_LUMI_UPLOAD_PROXY_PATH;
   return baseUrl
     ? createHttpClient(baseUrl)
@@ -65,6 +69,10 @@ export function createLumiApiClient(): LumiApiClient {
           chatProxyPath === "off"
             ? undefined
             : (chatProxyPath ?? "/api/chat/completions"),
+        messagesProxyPath:
+          messagesProxyPath === "off"
+            ? undefined
+            : (messagesProxyPath ?? "/api/chat/messages"),
         uploadProxyPath:
           uploadProxyPath === "off"
             ? undefined
