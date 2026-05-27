@@ -3,8 +3,10 @@ import {
   ChatProxyError,
   collectGoClawEventStream,
   extractGoClawAssistantText,
+  fetchMessagesThroughChatProxy,
   sendMessageThroughChatProxy,
   toGoClawMessages,
+  toLumiChatMessages,
 } from "./go-claw-chat";
 import type { ChatMessage } from "@/types/lumi";
 
@@ -25,6 +27,63 @@ describe("GoClaw chat adapter", () => {
     expect(toGoClawMessages(history, { content: "Color help?" })).toEqual([
       { role: "assistant", content: "Hi darling." },
       { role: "user", content: "Color help?" },
+    ]);
+  });
+
+  it("maps GoClaw session history to Lumi chat messages", () => {
+    expect(
+      toLumiChatMessages("conv", {
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            content:
+              "<media:image>\n\n<mochi_multimodal_context>\n- scenario: image_review\n</mochi_multimodal_context>\n\nDoes this work?",
+            created_at: "2026-05-27T03:10:00Z",
+            media_refs: [
+              { id: "media-1", kind: "image", mime_type: "image/png" },
+            ],
+          },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "Yes, sharpen the shoe.",
+          },
+          {
+            id: "tool1",
+            role: "tool",
+            content: "internal",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: "u1",
+        conversationId: "conv",
+        role: "user",
+        kind: "image",
+        content: "Does this work?",
+        attachments: [
+          {
+            media_id: "media-1",
+            source: "chat",
+            role: "user",
+            mimeType: "image/png",
+          },
+        ],
+        status: "sent",
+        createdAt: "2026-05-27T03:10:00Z",
+      },
+      {
+        id: "a1",
+        conversationId: "conv",
+        role: "mochi",
+        kind: "text",
+        content: "Yes, sharpen the shoe.",
+        attachments: undefined,
+        status: "sent",
+        createdAt: expect.any(String),
+      },
     ]);
   });
 
@@ -136,6 +195,36 @@ describe("GoClaw chat adapter", () => {
         content: "Hi",
       }),
     ).resolves.toEqual(result);
+  });
+
+  it("fetches session messages through the messages proxy", async () => {
+    vi.stubGlobal("location", { origin: "https://lumi.test" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json({
+          messages: [{ id: "a1", role: "assistant", content: "Hello" }],
+        }),
+      ),
+    );
+
+    const messages = await fetchMessagesThroughChatProxy(
+      "/api/chat/messages",
+      "conv",
+      "mochi-1",
+    );
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://lumi.test/api/chat/messages?session_id=mochi-1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(messages[0]).toEqual(
+      expect.objectContaining({
+        id: "a1",
+        role: "mochi",
+        content: "Hello",
+      }),
+    );
   });
 
   it("throws when a stream response has no body", async () => {

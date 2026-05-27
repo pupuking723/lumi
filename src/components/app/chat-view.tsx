@@ -134,14 +134,14 @@ export function ChatView() {
 
   const conversationId = conversationQuery.data?.id;
   const messagesKey = useMemo(
-    () => ["messages", conversationId] as const,
-    [conversationId],
+    () => ["messages", conversationId, sessionId] as const,
+    [conversationId, sessionId],
   );
 
   const messagesQuery = useQuery({
     queryKey: messagesKey,
-    enabled: Boolean(conversationId),
-    queryFn: () => apiClient.listMessages(conversationId as string),
+    enabled: Boolean(conversationId && sessionId),
+    queryFn: () => apiClient.listMessages(conversationId as string, sessionId),
   });
   const messages = messagesQuery.data ?? [];
   const hasUploadingAttachments = attachments.some(

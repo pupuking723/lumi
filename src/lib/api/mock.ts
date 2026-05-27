@@ -8,11 +8,19 @@ import type {
   UserProfile,
   VisionAnalysis,
 } from "@/types/lumi";
-import { sendMessageThroughChatProxy } from "./go-claw-chat";
-import type { AnalyzeVisionInput, CreateLookInput, LumiApiClient } from "./client";
+import {
+  fetchMessagesThroughChatProxy,
+  sendMessageThroughChatProxy,
+} from "./go-claw-chat";
+import type {
+  AnalyzeVisionInput,
+  CreateLookInput,
+  LumiApiClient,
+} from "./client";
 
 const delay = (ms = 420) => new Promise((resolve) => setTimeout(resolve, ms));
-const id = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+const id = (prefix: string) =>
+  `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 const now = () => new Date().toISOString();
 
 let userProfile: UserProfile = {
@@ -58,6 +66,7 @@ let looks: LookCard[] = [...seedLooks];
 
 interface MockClientOptions {
   chatProxyPath?: string;
+  messagesProxyPath?: string;
   uploadProxyPath?: string;
 }
 
@@ -109,7 +118,8 @@ function buildOotdReview(input: {
     overall_judgement: "Wear it, but sharpen one detail.",
     style_label: input.occasion ?? "soft icon",
     highlight: "The palette already feels intentional and easy to read.",
-    main_issue: "The look needs one cleaner anchor so the softness does not blur.",
+    main_issue:
+      "The look needs one cleaner anchor so the softness does not blur.",
     suggestion:
       input.note?.trim() ||
       "Add a sharper bag, glasses, or shoe shape to give the outfit a final point.",
@@ -138,7 +148,9 @@ function rememberChatResult(
   );
 }
 
-export function createMockClient(options: MockClientOptions = {}): LumiApiClient {
+export function createMockClient(
+  options: MockClientOptions = {},
+): LumiApiClient {
   return {
     async getMe() {
       await delay(180);
@@ -172,7 +184,15 @@ export function createMockClient(options: MockClientOptions = {}): LumiApiClient
       messagesByConversation[conversation.id] = [];
       return conversation;
     },
-    async listMessages(conversationId) {
+    async listMessages(conversationId, sessionId) {
+      if (options.messagesProxyPath && sessionId) {
+        return fetchMessagesThroughChatProxy(
+          options.messagesProxyPath,
+          conversationId,
+          sessionId,
+        );
+      }
+
       await delay(180);
       return messagesByConversation[conversationId] ?? [];
     },
@@ -270,7 +290,9 @@ export function createMockClient(options: MockClientOptions = {}): LumiApiClient
         id: id("share"),
         lookId,
         url: `https://lumi.style/share/${lookId}`,
-        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString(),
+        expiresAt: new Date(
+          Date.now() + 1000 * 60 * 60 * 24 * 14,
+        ).toISOString(),
       };
       return link;
     },
