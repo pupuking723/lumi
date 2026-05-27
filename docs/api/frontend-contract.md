@@ -7,12 +7,13 @@ The frontend uses `src/lib/api/client.ts`. If `NEXT_PUBLIC_API_BASE_URL` is empt
 - Frontend proxy: `POST /api/chat/completions`.
 - Upstream endpoint: `POST http://192.168.6.203:9600/v1/chat/completions`.
 - Upstream model: `agent:fox-spirit`.
-- Upstream headers: `X-GoClaw-User-Id: user-a`, `X-GoClaw-Tenant-Id: default`, `Accept-Language: zh`, `Authorization: Bearer dev-token`.
+- Auth flow: NextAuth Google sign-in exchanges the Google `id_token`/`access_token` with `POST /v1/auth/google/login`.
+- Upstream headers: `Accept-Language: zh`, `Authorization: Bearer <goclaw-user-session-token>`.
 - Request shape sent upstream: `{ model, messages, stream: true }`.
 - Response shape expected upstream: `text/event-stream` chunks shaped like `data: {"choices":[{"delta":{"content":"..."}}]}` and ending with `data: [DONE]`.
 - Set `NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH=off` to force local mock chat responses.
 
-Server-side environment variables are documented in `.env.example`; the code includes the same Apifox defaults for local development.
+Server-side environment variables are documented in `.env.example`. The frontend no longer sends `X-GoClaw-User-Id` or `X-GoClaw-Tenant-Id`; GoClaw derives those values from the bearer token.
 
 ## Required Endpoints
 

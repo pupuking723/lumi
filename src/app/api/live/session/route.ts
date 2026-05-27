@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth/options";
 
 export const dynamic = "force-dynamic";
 
-const DEFAULT_AGENT_TOKEN = "dev-token";
 const LIVE_COOKIE_MAX_AGE_SECONDS = 15 * 60;
 
 function cookieOptions(request: Request) {
@@ -16,22 +17,23 @@ function cookieOptions(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const token = process.env.LUMI_AGENT_API_TOKEN ?? DEFAULT_AGENT_TOKEN;
-  const userId = process.env.LUMI_AGENT_USER_ID ?? "user-a";
-  const tenantId = process.env.LUMI_AGENT_TENANT_ID ?? "default";
+  const session = await getServerSession(authOptions);
+  const token = session?.goclawAccessToken;
+
+  if (!token) {
+    return NextResponse.json(
+      { error: "Google sign-in is required." },
+      { status: 401 },
+    );
+  }
+
   const tokenCookieName =
     process.env.LUMI_LIVE_TOKEN_COOKIE_NAME ?? "lumi_live_token";
-  const userCookieName =
-    process.env.LUMI_LIVE_USER_COOKIE_NAME ?? "lumi_live_user_id";
-  const tenantCookieName =
-    process.env.LUMI_LIVE_TENANT_COOKIE_NAME ?? "lumi_live_tenant_id";
 
   const response = NextResponse.json({ ok: true });
   const options = cookieOptions(request);
 
   response.cookies.set(tokenCookieName, token, options);
-  response.cookies.set(userCookieName, userId, options);
-  response.cookies.set(tenantCookieName, tenantId, options);
 
   return response;
 }

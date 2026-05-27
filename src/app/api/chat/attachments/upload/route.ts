@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth/options";
 
 export const dynamic = "force-dynamic";
 
 const DEFAULT_AGENT_BASE_URL = "http://127.0.0.1:9600";
-const DEFAULT_AGENT_TOKEN = "dev-token";
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
@@ -20,9 +21,15 @@ export async function POST(request: Request) {
   const baseUrl =
     process.env.LUMI_AGENT_API_BASE_URL?.replace(/\/$/, "") ??
     DEFAULT_AGENT_BASE_URL;
-  const token = process.env.LUMI_AGENT_API_TOKEN ?? DEFAULT_AGENT_TOKEN;
-  const userId = process.env.LUMI_AGENT_USER_ID ?? "user-a";
-  const tenantId = process.env.LUMI_AGENT_TENANT_ID ?? "default";
+  const session = await getServerSession(authOptions);
+  const token = session?.goclawAccessToken;
+
+  if (!token) {
+    return NextResponse.json(
+      { error: "Google sign-in is required." },
+      { status: 401 },
+    );
+  }
 
   const upstreamBody = new FormData();
   upstreamBody.append("file", file, file.name);
@@ -33,8 +40,6 @@ export async function POST(request: Request) {
       method: "POST",
       cache: "no-store",
       headers: {
-        "X-GoClaw-User-Id": userId,
-        "X-GoClaw-Tenant-Id": tenantId,
         Authorization: `Bearer ${token}`,
       },
       body: upstreamBody,

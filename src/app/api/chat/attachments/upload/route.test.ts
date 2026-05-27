@@ -3,6 +3,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
+const authMocks = vi.hoisted(() => ({
+  getServerSession: vi.fn(),
+}));
+
+vi.mock("next-auth", () => authMocks);
+
 function requestWithFile(file?: Blob) {
   const formData = new FormData();
   if (file) formData.append("file", file, "look.png");
@@ -16,9 +22,10 @@ function requestWithFile(file?: Blob) {
 describe("chat attachment upload route", () => {
   beforeEach(() => {
     vi.stubEnv("LUMI_AGENT_API_BASE_URL", "https://agent.test");
-    vi.stubEnv("LUMI_AGENT_API_TOKEN", "test-token");
-    vi.stubEnv("LUMI_AGENT_USER_ID", "user-test");
-    vi.stubEnv("LUMI_AGENT_TENANT_ID", "tenant-test");
+    authMocks.getServerSession.mockResolvedValue({
+      goclawAccessToken: "goclaw-session-token",
+      user: { id: "google:user-test" },
+    });
   });
 
   it("requires an image file", async () => {
@@ -54,12 +61,23 @@ describe("chat attachment upload route", () => {
         method: "POST",
         cache: "no-store",
         headers: {
-          Authorization: "Bearer test-token",
-          "X-GoClaw-User-Id": "user-test",
-          "X-GoClaw-Tenant-Id": "tenant-test",
+          Authorization: "Bearer goclaw-session-token",
         },
       }),
     );
+  });
+
+  it("returns 401 without a GoClaw session token", async () => {
+    authMocks.getServerSession.mockResolvedValue(null);
+
+    const response = await POST(
+      requestWithFile(new Blob(["image"], { type: "image/png" })),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      error: "Google sign-in is required.",
+    });
+    expect(response.status).toBe(401);
   });
 
   it("returns 502 when upstream omits media_id", async () => {

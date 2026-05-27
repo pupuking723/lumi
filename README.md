@@ -4,9 +4,9 @@ Lumi is a mobile-first Next.js MVP for an AI Agent social app. The first Agent i
 
 The frontend runs independently with a mock API adapter. Set `NEXT_PUBLIC_API_BASE_URL` to connect the same UI to an external backend.
 
-Chat is already wired to the GoClaw Agent endpoint from Apifox through a local Next.js proxy route. The defaults match the LAN API at `http://192.168.6.203:9600` and can be overridden with the variables in `.env.example`.
+Chat is wired to GoClaw through local Next.js proxy routes. After Google sign-in, NextAuth exchanges the Google token with GoClaw and forwards the returned GoClaw bearer token to upstream C-side requests.
 
-Google login is wired through the same NextAuth Google provider pattern used by ShortArt. Configure `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, and `GOOGLE_SECRET` in `.env.local`; for local OAuth, `NEXTAUTH_URL` must match the port you are running.
+Google login is wired through the same NextAuth Google provider pattern used by ShortArt. Configure `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, `GOOGLE_SECRET`, and `LUMI_AGENT_API_BASE_URL` in `.env.local`; for local OAuth, `NEXTAUTH_URL` must match the port you are running.
 
 ## Getting Started
 

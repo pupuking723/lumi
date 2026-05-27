@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth/options";
 import { toGoClawMessages } from "@/lib/api/go-claw-chat";
 import type { ChatMessage, SendMessageInput } from "@/types/lumi";
 
@@ -6,7 +8,6 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_AGENT_BASE_URL = "http://127.0.0.1:9600";
 const DEFAULT_AGENT_MODEL = "agent:closy";
-const DEFAULT_AGENT_TOKEN = "dev-token";
 
 interface ChatProxyBody {
   conversationId?: string;
@@ -33,10 +34,16 @@ export async function POST(request: Request) {
     process.env.LUMI_AGENT_API_BASE_URL?.replace(/\/$/, "") ??
     DEFAULT_AGENT_BASE_URL;
   const model = process.env.LUMI_AGENT_MODEL ?? DEFAULT_AGENT_MODEL;
-  const token = process.env.LUMI_AGENT_API_TOKEN ?? DEFAULT_AGENT_TOKEN;
-  const userId = process.env.LUMI_AGENT_USER_ID ?? "user-a";
-  const tenantId = process.env.LUMI_AGENT_TENANT_ID ?? "default";
   const acceptLanguage = process.env.LUMI_AGENT_ACCEPT_LANGUAGE ?? "zh";
+  const session = await getServerSession(authOptions);
+  const token = session?.goclawAccessToken;
+
+  if (!token) {
+    return NextResponse.json(
+      { error: "Google sign-in is required." },
+      { status: 401 },
+    );
+  }
 
   let upstreamResponse: Response;
   try {
@@ -44,8 +51,6 @@ export async function POST(request: Request) {
       method: "POST",
       cache: "no-store",
       headers: {
-        "X-GoClaw-User-Id": userId,
-        "X-GoClaw-Tenant-Id": tenantId,
         "Accept-Language": acceptLanguage,
         Accept: "text/event-stream",
         "Content-Type": "application/json",

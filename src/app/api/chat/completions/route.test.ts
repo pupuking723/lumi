@@ -1,14 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
+const authMocks = vi.hoisted(() => ({
+  getServerSession: vi.fn(),
+}));
+
+vi.mock("next-auth", () => authMocks);
+
 describe("chat completions route", () => {
   beforeEach(() => {
     vi.stubEnv("LUMI_AGENT_API_BASE_URL", "https://agent.test");
-    vi.stubEnv("LUMI_AGENT_API_TOKEN", "test-token");
-    vi.stubEnv("LUMI_AGENT_USER_ID", "user-test");
-    vi.stubEnv("LUMI_AGENT_TENANT_ID", "tenant-test");
     vi.stubEnv("LUMI_AGENT_ACCEPT_LANGUAGE", "en");
     vi.stubEnv("LUMI_AGENT_MODEL", "agent:closy");
+    authMocks.getServerSession.mockResolvedValue({
+      goclawAccessToken: "goclaw-session-token",
+      user: { id: "google:user-test" },
+    });
   });
 
   it("forwards stream chat requests with session, scenario, context, and attachments", async () => {
@@ -70,9 +77,7 @@ describe("chat completions route", () => {
         method: "POST",
         cache: "no-store",
         headers: expect.objectContaining({
-          Authorization: "Bearer test-token",
-          "X-GoClaw-User-Id": "user-test",
-          "X-GoClaw-Tenant-Id": "tenant-test",
+          Authorization: "Bearer goclaw-session-token",
           "Accept-Language": "en",
           Accept: "text/event-stream",
         }),
@@ -105,6 +110,22 @@ describe("chat completions route", () => {
       { role: "assistant", content: "Old advice" },
       { role: "user", content: "Review this" },
     ]);
+  });
+
+  it("returns 401 without a GoClaw session token", async () => {
+    authMocks.getServerSession.mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("https://lumi.test/api/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ message: { content: "Hi" } }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      error: "Google sign-in is required.",
+    });
+    expect(response.status).toBe(401);
   });
 
   it("returns 400 when content and image are missing", async () => {
