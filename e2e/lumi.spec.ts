@@ -54,6 +54,9 @@ test("chat image attachments can be removed and sent", async ({ page }) => {
 test("memory page edits style memory", async ({ page }) => {
   await page.goto("/memory");
   await expect(page.getByLabel("Style summary")).toBeVisible();
+  await expect(page.getByText("Style memory")).toBeVisible();
+  await expect(page.getByText("Recent context")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask Mochi to update memory" })).toBeVisible();
 
   await page.getByLabel("Style summary").fill("clean casual");
   await page.getByLabel("Favorite colors").fill("black, white");

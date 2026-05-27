@@ -73,5 +73,19 @@ describe("MemoryView", () => {
       }),
     );
     await waitFor(() => expect(apiMocks.getMe).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+  });
+
+  it("shows the simplified memory dashboard without duplicate sections", async () => {
+    renderWithQueryClient(<MemoryView />);
+
+    expect(await screen.findByText("Style memory")).toBeInTheDocument();
+    expect(screen.getByText("Recent context")).toBeInTheDocument();
+    expect(screen.getByText("Saved advice")).toBeInTheDocument();
+    expect(screen.getByText("Sizes stay private")).toBeInTheDocument();
+
+    expect(screen.queryByText("Style profile")).not.toBeInTheDocument();
+    expect(screen.queryByText("Remembered preferences")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent state keywords")).not.toBeInTheDocument();
   });
 });
