@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   MessageCircle,
   Mic,
+  MicOff,
   Plus,
   Square,
   X,
@@ -437,6 +438,8 @@ function VoiceActiveControl({
   voiceLevels: number[];
   onStopVoice: () => void;
 }) {
+  const micPaused = voiceStatus === "responding";
+
   return (
     <div className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 inline-flex h-11 items-center overflow-hidden rounded-full border border-white/75 bg-[#f7f6f8]/86 text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] backdrop-blur-xl md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]">
       <button
@@ -451,12 +454,21 @@ function VoiceActiveControl({
       </button>
       <span className="h-6 w-px bg-[#d7d3dd]" aria-hidden />
       <span
-        className="flex h-11 w-10 items-center justify-center"
-        aria-label="Live voice level"
-        role="img"
+        className={cn(
+          "flex h-11 w-10 items-center justify-center",
+          micPaused && "text-[#8b8498]",
+        )}
+        aria-label={
+          micPaused
+            ? "Microphone paused while Mochi responds"
+            : "Live voice level"
+        }
+        role="status"
       >
         {voiceStatus === "connecting" ? (
           <LoaderCircle size={18} className="animate-spin" aria-hidden />
+        ) : micPaused ? (
+          <MicOff size={18} strokeWidth={2.5} aria-hidden />
         ) : (
           <MiniVoiceLevelMeter levels={voiceLevels} tone="dark" />
         )}

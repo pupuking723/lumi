@@ -82,6 +82,8 @@ export function ChatView() {
   const livePlaybackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const liveManualStopRef = useRef(false);
   const liveExpectedCloseRef = useRef(false);
+  const liveInputPausedRef = useRef(false);
+  const liveResumeTimerRef = useRef<number | null>(null);
   const liveConnectTimeoutRef = useRef<number | null>(null);
   const liveReconnectAttemptRef = useRef(0);
   const liveReconnectTimerRef = useRef<number | null>(null);
@@ -339,6 +341,37 @@ export function ChatView() {
     liveAudioQueueRef.current = Promise.resolve();
   }, []);
 
+  const clearLiveResumeTimer = useCallback(() => {
+    if (liveResumeTimerRef.current !== null) {
+      window.clearTimeout(liveResumeTimerRef.current);
+      liveResumeTimerRef.current = null;
+    }
+  }, []);
+
+  const pauseLiveInput = useCallback(() => {
+    clearLiveResumeTimer();
+    liveInputPausedRef.current = true;
+    setVoiceStatus("responding");
+  }, [clearLiveResumeTimer]);
+
+  const resumeLiveInputAfterPlayback = useCallback(async () => {
+    clearLiveResumeTimer();
+    await liveAudioQueueRef.current.catch(() => undefined);
+    if (!liveInputPausedRef.current) return;
+
+    const context = audioContextRef.current;
+    const remainingMs = context
+      ? Math.max(0, (livePlaybackTimeRef.current - context.currentTime) * 1000)
+      : 0;
+    liveResumeTimerRef.current = window.setTimeout(() => {
+      liveResumeTimerRef.current = null;
+      liveInputPausedRef.current = false;
+      setVoiceStatus((current) =>
+        current === "responding" ? "listening" : current,
+      );
+    }, remainingMs + 80);
+  }, [clearLiveResumeTimer]);
+
   const ensurePlaybackContext = useCallback(async () => {
     const AudioContextCtor = getAudioContextCtor();
     if (!AudioContextCtor) throw new Error("Audio playback is unavailable.");
@@ -401,6 +434,8 @@ export function ChatView() {
     (resetState = true) => {
       liveManualStopRef.current = true;
       liveExpectedCloseRef.current = true;
+      liveInputPausedRef.current = false;
+      clearLiveResumeTimer();
       liveSessionGenerationRef.current += 1;
       liveCaptureGenerationRef.current += 1;
       if (liveReconnectTimerRef.current !== null) {
@@ -458,7 +493,7 @@ export function ChatView() {
         setVoiceLevels(DEFAULT_VOICE_LEVELS);
       }
     },
-    [clearLiveAssistantDraft, stopLivePlayback],
+    [clearLiveAssistantDraft, clearLiveResumeTimer, stopLivePlayback],
   );
 
   const sendLiveMediaAttachment = useCallback(
@@ -619,6 +654,14 @@ export function ChatView() {
           socket.readyState !== WebSocket.OPEN
         )
           return;
+        if (liveInputPausedRef.current) {
+          if (speechActive) {
+            speechActive = false;
+            sendActivity("activity_end");
+          }
+          preSpeechFrames.length = 0;
+          return;
+        }
         const input = event.inputBuffer.getChannelData(0);
         const metrics = audioFrameMetrics(input);
         const now = performance.now();
@@ -705,6 +748,8 @@ export function ChatView() {
     async (resetReconnect = true) => {
       liveManualStopRef.current = false;
       liveExpectedCloseRef.current = false;
+      liveInputPausedRef.current = false;
+      clearLiveResumeTimer();
       if (resetReconnect) {
         liveReconnectAttemptRef.current = 0;
         liveSentMediaIdsRef.current.clear();
@@ -775,7 +820,7 @@ export function ChatView() {
 
           const eventType = parsed.type ?? parsed.event;
           if (eventType === "ready" || eventType === "live_ready") {
-            setVoiceStatus("listening");
+            if (!liveInputPausedRef.current) setVoiceStatus("listening");
             return;
           }
           if (eventType === "live_setup_complete") {
@@ -798,10 +843,20 @@ export function ChatView() {
           }
 
           if (eventType === "done" || parsed.done) {
-            setVoiceStatus("listening");
+            void resumeLiveInputAfterPlayback();
+            return;
+          }
+          if (eventType === "live_response_start") {
+            pauseLiveInput();
+            return;
+          }
+          if (eventType === "live_response_end") {
+            void resumeLiveInputAfterPlayback();
             return;
           }
           if (eventType === "live_interrupted") {
+            liveInputPausedRef.current = false;
+            clearLiveResumeTimer();
             clearLiveAssistantDraft();
             stopLivePlayback();
             setVoiceStatus("listening");
@@ -814,7 +869,7 @@ export function ChatView() {
               ? parsed.data
               : undefined);
           if (audio) {
-            setVoiceStatus("responding");
+            pauseLiveInput();
             void playLiveAudio(audio);
             return;
           }
@@ -825,8 +880,8 @@ export function ChatView() {
             parsed.message ??
             parsed.transcript;
           if (text) {
-            setVoiceStatus("responding");
             if (eventType === "live_transcript" && parsed.role === "user") {
+              if (!liveInputPausedRef.current) setVoiceStatus("speaking");
               upsertLiveUserTranscript(text);
               return;
             }
@@ -834,14 +889,17 @@ export function ChatView() {
               eventType === "live_transcript" &&
               parsed.role === "assistant"
             ) {
+              pauseLiveInput();
               finishLiveUserTranscript();
               appendLiveAssistantDelta(text);
               return;
             }
             if (eventType === "message") {
               if (parsed.role === "assistant") {
+                pauseLiveInput();
                 finishLiveUserTranscript();
                 finalizeLiveAssistantMessage(text);
+                void resumeLiveInputAfterPlayback();
               } else {
                 if (parsed.role === "user") {
                   const alreadyShown =
@@ -908,11 +966,14 @@ export function ChatView() {
       appendLiveAssistantDelta,
       attachments,
       clearLiveAssistantDraft,
+      clearLiveResumeTimer,
       ensurePlaybackContext,
       finishLiveUserTranscript,
       finalizeLiveAssistantMessage,
+      pauseLiveInput,
       playLiveAudio,
       flushQueuedLiveMediaAttachments,
+      resumeLiveInputAfterPlayback,
       sendOrQueueLiveMediaAttachment,
       sessionId,
       startLiveCapture,
