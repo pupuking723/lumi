@@ -25,6 +25,23 @@ export interface GoClawChatCompletion {
   }>;
 }
 
+export interface GoClawSessionMessages {
+  session_id?: string;
+  messages?: GoClawSessionMessage[];
+}
+
+interface GoClawSessionMessage {
+  id?: string;
+  role?: string;
+  content?: string;
+  created_at?: string;
+  media_refs?: Array<{
+    id?: string;
+    kind?: string;
+    mime_type?: string;
+  }>;
+}
+
 interface GoClawStreamResult {
   content: string;
   upstreamId?: string;
@@ -34,7 +51,8 @@ const now = () => new Date().toISOString();
 
 function makeMessageId(prefix: string, seed?: string) {
   const generated =
-    globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10);
+    globalThis.crypto?.randomUUID?.() ??
+    Math.random().toString(36).slice(2, 10);
   return `${prefix}-${seed ?? generated}`;
 }
 
@@ -64,7 +82,9 @@ export function toGoClawMessages(
   ];
 }
 
-export function extractGoClawAssistantText(payload: GoClawChatCompletion): string {
+export function extractGoClawAssistantText(
+  payload: GoClawChatCompletion,
+): string {
   const messageText = payload.choices?.[0]?.message?.content?.trim();
   if (messageText) return messageText;
 
@@ -78,10 +98,63 @@ export function extractGoClawAssistantText(payload: GoClawChatCompletion): strin
   throw new Error("GoClaw chat response did not include assistant content.");
 }
 
-export function extractGoClawStreamDelta(payload: GoClawChatCompletion): string {
-  return payload.choices
-    ?.map((choice) => choice.delta?.content ?? "")
-    .join("") ?? "";
+export function extractGoClawStreamDelta(
+  payload: GoClawChatCompletion,
+): string {
+  return (
+    payload.choices?.map((choice) => choice.delta?.content ?? "").join("") ?? ""
+  );
+}
+
+function cleanHistoryContent(content: string) {
+  return content
+    .replace(
+      /<mochi_multimodal_context>[\s\S]*?<\/mochi_multimodal_context>/g,
+      "",
+    )
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("<media:"))
+    .join("\n")
+    .trim();
+}
+
+export function toLumiChatMessages(
+  conversationId: string,
+  payload: GoClawSessionMessages,
+): ChatMessage[] {
+  return (payload.messages ?? [])
+    .map((message, index): ChatMessage | null => {
+      const role =
+        message.role === "assistant"
+          ? "mochi"
+          : message.role === "user" || message.role === "system"
+            ? message.role
+            : null;
+      if (!role) return null;
+
+      const attachments = (message.media_refs ?? [])
+        .filter((ref) => ref.id)
+        .map((ref) => ({
+          media_id: ref.id as string,
+          source: "chat" as const,
+          role: "user" as const,
+          mimeType: ref.mime_type,
+        }));
+      const content = cleanHistoryContent(message.content ?? "");
+      if (!content && attachments.length === 0) return null;
+
+      return {
+        id: message.id ?? makeMessageId("msg-history", String(index)),
+        conversationId,
+        role,
+        kind: attachments.length > 0 ? "image" : "text",
+        content: content || "Can you review this look?",
+        attachments: attachments.length > 0 ? attachments : undefined,
+        status: "sent",
+        createdAt: message.created_at || now(),
+      };
+    })
+    .filter((message): message is ChatMessage => message !== null);
 }
 
 function getSseDataLines(rawEvent: string) {
@@ -256,4 +329,35 @@ export async function sendMessageThroughChatProxy(
   }
 
   return response.json() as Promise<SendMessageResult>;
+}
+
+export async function fetchMessagesThroughChatProxy(
+  messagesProxyPath: string,
+  conversationId: string,
+  sessionId: string,
+): Promise<ChatMessage[]> {
+  const url = new URL(
+    messagesProxyPath,
+    globalThis.location?.origin ?? "http://localhost",
+  );
+  url.searchParams.set("session_id", sessionId);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      errorText || `Messages proxy failed with ${response.status}`,
+    );
+  }
+
+  return toLumiChatMessages(
+    conversationId,
+    (await response.json()) as GoClawSessionMessages,
+  );
 }
