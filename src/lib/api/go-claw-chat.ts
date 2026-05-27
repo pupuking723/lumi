@@ -30,6 +30,16 @@ interface GoClawStreamResult {
   upstreamId?: string;
 }
 
+export class ChatProxyError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ChatProxyError";
+    this.status = status;
+  }
+}
+
 const now = () => new Date().toISOString();
 
 function makeMessageId(prefix: string, seed?: string) {
@@ -232,7 +242,17 @@ export async function sendMessageThroughChatProxy(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(errorText || `Chat proxy failed with ${response.status}`);
+    let message = errorText || `Chat proxy failed with ${response.status}`;
+    try {
+      const payload = JSON.parse(errorText) as { error?: unknown; detail?: unknown };
+      message =
+        (typeof payload.error === "string" && payload.error) ||
+        (typeof payload.detail === "string" && payload.detail) ||
+        message;
+    } catch {
+      // Keep the raw response text when the proxy does not return JSON.
+    }
+    throw new ChatProxyError(message, response.status);
   }
 
   const contentType = response.headers.get("content-type") ?? "";

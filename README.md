@@ -6,7 +6,7 @@ The frontend runs independently with a mock API adapter. Set `NEXT_PUBLIC_API_BA
 
 Chat is wired to GoClaw through local Next.js proxy routes. After Google sign-in, NextAuth exchanges the Google token with GoClaw and forwards the returned GoClaw bearer token to upstream C-side requests.
 
-Google login is wired through the same NextAuth Google provider pattern used by ShortArt. Configure `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, `GOOGLE_SECRET`, and `LUMI_AGENT_API_BASE_URL` in `.env.local`; for local OAuth, `NEXTAUTH_URL` must match the port you are running.
+Google login is wired through NextAuth. The button uses the Google OAuth provider, and Google One Tap uses a NextAuth credentials provider that exchanges the GIS `credential` with GoClaw. Configure `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, `GOOGLE_SECRET`, and `LUMI_AGENT_API_BASE_URL` in `.env.local`; for local OAuth, `NEXTAUTH_URL` must match the port you are running.
 
 ## Getting Started
 

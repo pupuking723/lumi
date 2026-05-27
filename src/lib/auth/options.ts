@@ -1,4 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
+import type { JWT } from "next-auth/jwt";
+import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 
 const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -35,10 +37,10 @@ export const isGoogleAuthConfigured = Boolean(
 );
 
 function getProviders() {
-  if (!googleClientId || !googleClientSecret) return [];
+  const providers = [];
 
-  return [
-    GoogleProvider({
+  if (googleClientId && googleClientSecret) {
+    providers.push(GoogleProvider({
       clientId: googleClientId,
       clientSecret: googleClientSecret,
       authorization: {
@@ -48,8 +50,41 @@ function getProviders() {
           response_type: "code",
         },
       },
-    }),
-  ];
+    }));
+  }
+
+  if (googleClientId) {
+    providers.push(
+      CredentialsProvider({
+        id: "google-one-tap",
+        name: "Google One Tap",
+        credentials: {
+          credential: { label: "Credential", type: "text" },
+        },
+        async authorize(credentials) {
+          const credential = credentials?.credential;
+          if (!credential) return null;
+
+          const goclaw = await exchangeGoogleTokenForGoClawSession({
+            credential,
+          });
+
+          return {
+            id: goclaw.user.id,
+            name: goclaw.user.name ?? goclaw.user.email,
+            email: goclaw.user.email,
+            image: goclaw.user.avatar,
+            goclawAccessToken: goclaw.access_token,
+            goclawExpiresAt: getExpiresAt(goclaw),
+            goclawUser: goclaw.user,
+            goclawTenant: goclaw.tenant,
+          };
+        },
+      }),
+    );
+  }
+
+  return providers;
 }
 
 function getGoClawBaseUrl() {
@@ -68,12 +103,14 @@ function getExpiresAt(payload: GoClawLoginResponse) {
 }
 
 async function exchangeGoogleTokenForGoClawSession(input: {
+  credential?: string;
   idToken?: string;
   accessToken?: string;
 }) {
   const body: Record<string, string> = {};
+  if (input.credential) body.credential = input.credential;
   if (input.idToken) {
-    body.credential = input.idToken;
+    body.credential ??= input.idToken;
     body.id_token = input.idToken;
   }
   if (input.accessToken) body.access_token = input.accessToken;
@@ -98,6 +135,14 @@ async function exchangeGoogleTokenForGoClawSession(input: {
   }
 
   return payload;
+}
+
+function applyGoClawSessionToToken(token: JWT, goclaw: GoClawLoginResponse) {
+  token.goclawAccessToken = goclaw.access_token;
+  token.goclawExpiresAt = getExpiresAt(goclaw);
+  token.goclawUser = goclaw.user;
+  token.goclawTenant = goclaw.tenant;
+  token.goclawAuthError = undefined;
 }
 
 async function verifyGoClawSession(accessToken: string) {
@@ -133,7 +178,7 @@ export const authOptions: NextAuthOptions = {
   },
   providers: getProviders(),
   callbacks: {
-    async jwt({ token, account }) {
+    async jwt({ token, account, user }) {
       if (account?.provider === "google") {
         const idToken =
           typeof account.id_token === "string" ? account.id_token : undefined;
@@ -147,11 +192,7 @@ export const authOptions: NextAuthOptions = {
             idToken,
             accessToken,
           });
-          token.goclawAccessToken = goclaw.access_token;
-          token.goclawExpiresAt = getExpiresAt(goclaw);
-          token.goclawUser = goclaw.user;
-          token.goclawTenant = goclaw.tenant;
-          token.goclawAuthError = undefined;
+          applyGoClawSessionToToken(token, goclaw);
         } catch (error) {
           token.goclawAccessToken = undefined;
           token.goclawExpiresAt = undefined;
@@ -160,6 +201,12 @@ export const authOptions: NextAuthOptions = {
           token.goclawAuthError =
             error instanceof Error ? error.message : "GoClaw login failed";
         }
+      } else if (account?.provider === "google-one-tap" && user) {
+        token.goclawAccessToken = user.goclawAccessToken;
+        token.goclawExpiresAt = user.goclawExpiresAt;
+        token.goclawUser = user.goclawUser;
+        token.goclawTenant = user.goclawTenant;
+        token.goclawAuthError = undefined;
       } else if (typeof token.goclawAccessToken === "string") {
         const isValid = await verifyGoClawSession(token.goclawAccessToken);
         if (!isValid) {

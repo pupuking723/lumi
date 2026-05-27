@@ -38,6 +38,7 @@ import {
   stopMediaStream,
   textsOverlap,
 } from "./chat/chat-live-audio";
+import { ChatProxyError } from "@/lib/api/go-claw-chat";
 import type { PendingAttachment } from "./chat/chat-types";
 import type {
   ChatMessage,
@@ -58,6 +59,14 @@ const LIVE_CONNECT_TIMEOUT_MS = 12000;
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function isUnauthenticatedError(error: unknown) {
+  return (
+    (error instanceof ChatProxyError && error.status === 401) ||
+    (error instanceof Error &&
+      /Google sign-in is required|unauthorized|401/i.test(error.message))
+  );
 }
 
 export function ChatView() {
@@ -1296,7 +1305,6 @@ export function ChatView() {
   return (
     <AppChrome
       fixedViewport
-      showPageTitle={false}
       mainClassName="relative min-h-0 overflow-hidden !p-0"
     >
       {chatPanelOpen && (
@@ -1306,6 +1314,9 @@ export function ChatView() {
             messages={messages}
             showPendingIndicator={showPendingIndicator}
             showSendError={sendMutation.isError && !lastSendStopped}
+            sendErrorKind={
+              isUnauthenticatedError(sendMutation.error) ? "auth" : "generic"
+            }
             onRetry={() => lastPayload && submit(lastPayload)}
           />
           {textComposerOpen && (

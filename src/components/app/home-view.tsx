@@ -4,7 +4,7 @@ import { useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { ArrowRight, Heart, MessageCircle, Star } from "lucide-react";
+import { Heart, MessageCircle, Star } from "lucide-react";
 import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { Pill } from "@/components/ui/pill";
 import { cn } from "@/lib/utils";
@@ -72,13 +72,6 @@ function HeroSection() {
           </Link>
           <div className="flex items-center gap-2">
             <GoogleAuthButton compact className="hidden sm:inline-flex" />
-            <Link
-              href="/chat"
-              className="inline-flex h-10 items-center gap-2 rounded-full border border-white/78 bg-[#fbfafc]/68 px-4 text-sm font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.92)_inset] backdrop-blur-xl transition hover:bg-white/86"
-            >
-              Open chat
-              <ArrowRight size={15} aria-hidden />
-            </Link>
           </div>
         </nav>
 

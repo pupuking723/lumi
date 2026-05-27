@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
+import type { Session } from "next-auth";
 import { Brain, Menu, MessageCircle, UserRound, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -20,34 +22,19 @@ const navItems = [
   { href: "/profile", label: "Me", icon: UserRound },
 ];
 
-const titles: Record<string, string> = {
-  "/": "Today’s mirror",
-  "/chat": "Chat",
-  "/memory": "Mochi remembers you",
-  "/camera": "Snap check",
-  "/looks": "Saved looks",
-  "/profile": "Me",
-  "/profile/settings": "Settings",
-  "/profile/notifications": "Notifications",
-  "/profile/subscription": "Subscription",
-  "/profile/privacy": "Privacy",
-};
-
 export function AppChrome({
   children,
   contentScroll = false,
   fixedViewport = false,
-  showPageTitle = true,
   mainClassName,
 }: {
   children: React.ReactNode;
   contentScroll?: boolean;
   fixedViewport?: boolean;
-  showPageTitle?: boolean;
   mainClassName?: string;
 }) {
   const pathname = usePathname();
-  const title = titles[pathname] ?? "Lumi";
+  const { data: session } = useSession();
   const lockedViewport = fixedViewport || contentScroll;
 
   return (
@@ -58,22 +45,21 @@ export function AppChrome({
           lockedViewport ? "h-dvh overflow-hidden" : "min-h-dvh",
         )}
       >
-        <aside className="hidden w-[244px] shrink-0 border-r border-white/70 bg-[#f7f6f8]/58 px-4 py-5 shadow-[18px_0_54px_rgba(47,45,58,0.08)] backdrop-blur-2xl md:sticky md:top-0 md:flex md:h-dvh md:flex-col">
+        <aside className="hidden w-[264px] shrink-0 border-r border-white/70 bg-[#f7f6f8]/72 px-5 py-6 shadow-[18px_0_54px_rgba(47,45,58,0.08)] backdrop-blur-2xl md:sticky md:top-0 md:flex md:h-dvh md:flex-col">
           <Link
             href="/"
-            className="font-display text-[2.25rem] font-semibold leading-none text-[#332f43]"
+            className="font-display text-[2.35rem] font-semibold leading-none text-[#332f43]"
             aria-label="Lumi home"
           >
             Lumi
           </Link>
-          <p className="mt-2 text-sm font-extrabold text-[#7a728a]">Mochi</p>
-          <nav className="mt-8 flex flex-col gap-1.5">
+          <nav className="mt-10 flex flex-col gap-1">
             {navItems.map((item) => (
-              <NavItem key={item.href} item={item} pathname={pathname} />
+              <SideNavItem key={item.href} item={item} pathname={pathname} compact />
             ))}
           </nav>
-          <div className="mt-auto pt-5">
-            <GoogleAuthButton />
+          <div className="mt-auto pt-8">
+            <AccountChip session={session} />
           </div>
         </aside>
 
@@ -83,7 +69,7 @@ export function AppChrome({
             lockedViewport ? "h-dvh overflow-hidden" : "min-h-dvh",
           )}
         >
-          <header className="sticky top-0 z-20 shrink-0 border-b border-white/62 bg-[#f7f6f8]/64 px-5 pb-3 pt-[calc(0.9rem+env(safe-area-inset-top))] shadow-[0_12px_34px_rgba(47,45,58,0.05)] backdrop-blur-2xl md:px-8 md:pt-5">
+          <header className="sticky top-0 z-20 shrink-0 px-5 pb-3 pt-[calc(0.9rem+env(safe-area-inset-top))] md:hidden">
             <div className="mx-auto w-full max-w-[760px]">
               <div className="flex items-center justify-between md:hidden">
                 <div className="flex items-center gap-3">
@@ -92,7 +78,7 @@ export function AppChrome({
                       <button
                         type="button"
                         aria-label="Open navigation"
-                        className="flex size-11 items-center justify-center rounded-[20px] border border-white/78 bg-white/56 text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.95)_inset] backdrop-blur-xl transition hover:bg-white/76 hover:text-[#302d43]"
+                        className="flex size-11 items-center justify-center rounded-full border border-white/75 bg-[#f7f6f8]/76 text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] backdrop-blur-xl transition hover:bg-white/86 hover:text-[#302d43]"
                       >
                         <Menu size={20} strokeWidth={2.45} aria-hidden />
                       </button>
@@ -100,7 +86,7 @@ export function AppChrome({
                     <SheetContent
                       side="left"
                       showCloseButton={false}
-                      className="w-[min(19rem,calc(100vw-2rem))] border-r border-white/72 bg-[#f7f6f8]/88 px-4 py-[calc(1rem+env(safe-area-inset-top))] shadow-[18px_0_54px_rgba(47,45,58,0.18)] backdrop-blur-2xl sm:max-w-none"
+                      className="w-[min(21rem,calc(100vw-1.75rem))] gap-0 rounded-r-[30px] border-r border-white/72 bg-[#f7f6f8]/94 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-[calc(1.25rem+env(safe-area-inset-top))] shadow-[22px_0_64px_rgba(47,45,58,0.18)] backdrop-blur-2xl sm:max-w-none"
                     >
                       <SheetTitle className="sr-only">Lumi navigation</SheetTitle>
                       <SheetDescription className="sr-only">
@@ -111,50 +97,40 @@ export function AppChrome({
                           <SheetClose asChild>
                             <Link
                               href="/"
-                              className="font-display text-[2.25rem] font-semibold leading-none text-[#332f43]"
+                              className="font-display text-[2.35rem] font-semibold leading-none text-[#332f43]"
                               aria-label="Lumi home"
                             >
                               Lumi
                             </Link>
                           </SheetClose>
-                          <p className="mt-2 text-sm font-extrabold text-[#7a728a]">
-                            Mochi
-                          </p>
                         </div>
                         <SheetClose asChild>
                           <button
                             type="button"
                             aria-label="Close navigation"
-                            className="flex size-10 items-center justify-center rounded-[18px] border border-white/78 bg-white/56 text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.95)_inset]"
+                            className="flex size-11 items-center justify-center rounded-full border border-white/75 bg-[#f7f6f8]/76 text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] backdrop-blur-xl transition hover:bg-white/86 hover:text-[#302d43]"
                           >
-                            <X size={18} strokeWidth={2.45} aria-hidden />
+                            <X size={19} strokeWidth={2.35} aria-hidden />
                           </button>
                         </SheetClose>
                       </div>
-                      <nav className="mt-8 flex flex-col gap-1.5">
+                      <nav className="mt-14 flex flex-col gap-1.5">
                         {navItems.map((item) => (
                           <SheetClose asChild key={item.href}>
-                            <NavItem item={item} pathname={pathname} />
+                            <SideNavItem item={item} pathname={pathname} />
                           </SheetClose>
                         ))}
                       </nav>
+                      <div className="mt-auto flex items-end justify-between gap-4 pt-8">
+                        <SheetClose asChild>
+                          <AccountChip session={session} />
+                        </SheetClose>
+                      </div>
                     </SheetContent>
                   </Sheet>
-                  <Link
-                    href="/"
-                    className="font-display text-[2rem] font-semibold leading-none text-[#332f43]"
-                    aria-label="Lumi home"
-                  >
-                    Lumi
-                  </Link>
                 </div>
                 <GoogleAuthButton compact />
               </div>
-              {showPageTitle && (
-                <p className="mt-1 text-sm font-extrabold text-[#5f586f] md:mt-0">
-                  {title}
-                </p>
-              )}
             </div>
           </header>
 
@@ -176,10 +152,12 @@ export function AppChrome({
   );
 }
 
-function NavItem({
+function SideNavItem({
+  compact = false,
   item,
   pathname,
 }: {
+  compact?: boolean;
   item: (typeof navItems)[number];
   pathname: string;
 }) {
@@ -191,27 +169,64 @@ function NavItem({
       href={item.href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative font-extrabold transition",
-        "flex min-h-12 items-center gap-3 rounded-[24px] px-3 py-3 text-sm text-[#81798e] hover:bg-white/36 hover:text-[#3b374c]",
-        active && "text-[#2b2938]",
-        active && "bg-white/34 shadow-[0_1px_0_rgba(255,255,255,0.68)_inset]",
+        "group relative flex items-center font-extrabold transition",
+        compact
+          ? "min-h-11 gap-2.5 rounded-[18px] px-3 text-sm"
+          : "min-h-14 gap-3 rounded-[24px] px-3.5 text-base",
+        active
+          ? "bg-[#ebe8ef]/86 text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset]"
+          : "text-[#777188] hover:bg-white/42 hover:text-[#302d43]",
       )}
     >
-      {active && (
-        <span className="absolute left-1 top-3 bottom-3 w-1 rounded-full bg-[#6f6880]/72" />
-      )}
       <span
         className={cn(
-          "inline-flex shrink-0 items-center justify-center transition duration-200",
-          "size-8 rounded-[16px]",
+          "flex shrink-0 items-center justify-center rounded-full transition",
+          compact ? "size-8" : "size-9",
           active
-            ? "bg-[#e3e1e8]/78 shadow-[0_1px_0_rgba(255,255,255,0.88)_inset,0_10px_24px_rgba(42,39,55,0.1)]"
-            : "bg-transparent group-hover:bg-white/48",
+            ? "bg-[#e2dfe8]/92 shadow-[0_1px_0_rgba(255,255,255,0.92)_inset,0_12px_24px_rgba(42,39,55,0.09)]"
+            : "group-hover:bg-white/54",
         )}
       >
-        <Icon size={18} strokeWidth={2.35} aria-hidden />
+        <Icon size={compact ? 17 : 20} strokeWidth={2.25} aria-hidden />
       </span>
       <span>{item.label}</span>
+    </Link>
+  );
+}
+
+function AccountChip({ session }: { session: Session | null }) {
+  const user = session?.user;
+  const name = user?.name ?? user?.email ?? "Guest";
+  const subtitle = user?.email ?? (user ? "Signed in" : "Not signed in");
+  const avatarUrl = user?.image ?? session?.goclawUser?.avatar;
+  const initial = (name.trim().charAt(0) || "L").toUpperCase();
+
+  return (
+      <Link
+        href={user ? "/profile" : "/"}
+      className="inline-flex max-w-full items-center gap-2.5 rounded-full border border-white/78 bg-[#fbfafc]/78 py-1.5 pl-1.5 pr-3.5 text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_18px_42px_rgba(42,39,55,0.14)] backdrop-blur-xl"
+    >
+      <span
+        className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#e7e4ec] text-xs font-extrabold text-[#5f586f]"
+        style={
+          avatarUrl
+            ? {
+                backgroundImage: `url(${avatarUrl})`,
+                backgroundPosition: "center",
+                backgroundSize: "cover",
+              }
+            : undefined
+        }
+        aria-hidden
+      >
+        {!avatarUrl && initial}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-extrabold leading-4">{name}</span>
+        <span className="block truncate text-[0.72rem] font-bold leading-4 text-[#81798e]">
+          {subtitle}
+        </span>
+      </span>
     </Link>
   );
 }

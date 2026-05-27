@@ -5,16 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
   Bell,
-  Brain,
   ChevronRight,
-  CreditCard,
   Lock,
   Settings,
-  Shield,
 } from "lucide-react";
 import { AppChrome } from "./app-chrome";
-import { MochiPortrait } from "./mochi-portrait";
-import { Pill } from "@/components/ui/pill";
 import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { apiClient } from "@/lib/api/client";
 
@@ -31,24 +26,6 @@ const profileItems = [
     href: "/profile/notifications",
     icon: Bell,
   },
-  {
-    label: "Subscription",
-    description: "Plan, perks, billing",
-    href: "/profile/subscription",
-    icon: CreditCard,
-  },
-  {
-    label: "Privacy",
-    description: "Photos, share links, data permissions",
-    href: "/profile/privacy",
-    icon: Shield,
-  },
-  {
-    label: "Memory management",
-    description: "Review, update, or clear what Mochi remembers",
-    href: "/memory",
-    icon: Brain,
-  },
 ];
 
 export function ProfileView({ settings = false }: { settings?: boolean }) {
@@ -56,54 +33,56 @@ export function ProfileView({ settings = false }: { settings?: boolean }) {
     queryKey: ["me"],
     queryFn: apiClient.getMe,
   });
+  const { data: session, status } = useSession();
+  const user = status === "authenticated" ? session?.user : undefined;
+  const displayName = user?.name ?? me?.displayName ?? "Guest";
+  const email = user?.email;
+  const avatarUrl = user?.image ?? session?.goclawUser?.avatar;
 
   return (
     <AppChrome contentScroll>
-      <div className="space-y-4">
-        <section className="grid grid-cols-[1fr_130px] gap-3 rounded-[30px] border border-white/70 bg-white/70 p-4 soft-stitch">
-          <div>
-            <Pill tone="lilac">@{me?.handle ?? "softicon"}</Pill>
-            <h1 className="mt-3 font-display text-4xl font-semibold leading-none text-[#343145]">
-              Me
-            </h1>
-            <p className="mt-3 text-sm font-semibold leading-5 text-[#716a7e]">
-              Manage your account, notifications, subscription, privacy, and
-              how Mochi remembers you.
-            </p>
+      <div className="mx-auto max-w-[620px] space-y-5 pb-8">
+        <section className="rounded-[28px] border border-white/72 bg-[#fbfafc]/72 p-4 shadow-[0_18px_48px_rgba(47,45,58,0.08)] backdrop-blur-xl">
+          {user ? (
+            <div className="flex min-w-0 items-center gap-3">
+              <ProfileAvatar name={displayName} image={avatarUrl} />
+              <div className="min-w-0">
+                <h1 className="truncate text-2xl font-extrabold leading-tight text-[#302d43]">
+                  {displayName}
+                </h1>
+                {email && (
+                  <p className="mt-1 truncate text-sm font-bold text-[#8a8297]">
+                    {email}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <h1 className="text-2xl font-extrabold leading-tight text-[#302d43]">
+                  Sign in to personalize Lumi
+                </h1>
+                <p className="mt-2 text-sm font-bold leading-6 text-[#7a7289]">
+                  Connect Google so Mochi can keep your style memory and account
+                  settings together.
+                </p>
+              </div>
+              <GoogleAuthButton />
+            </div>
+          )}
+        </section>
+
+        <ProfileSection title="Account">
+          <div className="overflow-hidden rounded-[28px] border border-white/72 bg-white/58 p-2 shadow-[0_18px_48px_rgba(47,45,58,0.07)] backdrop-blur-xl">
+          {profileItems.map((item) => (
+            <ProfileLinkRow key={item.label} item={item} />
+          ))}
           </div>
-          <MochiPortrait variant="variants" className="min-h-[170px]" />
-        </section>
-
-        <GoogleAccountPanel />
-
-        <section className="rounded-[28px] border border-white/70 bg-white/70 p-2">
-          {profileItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="flex items-center justify-between rounded-[22px] px-3 py-3 text-sm font-extrabold text-[#343145] transition hover:bg-white/60"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-[#e6e4ea] text-[#5f586f]">
-                    <Icon size={17} aria-hidden />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block">{item.label}</span>
-                    <span className="mt-0.5 block truncate text-xs font-bold text-[#8c7897]">
-                      {item.description}
-                    </span>
-                  </span>
-                </span>
-                <ChevronRight size={17} aria-hidden />
-              </Link>
-            );
-          })}
-        </section>
+        </ProfileSection>
 
         {settings && (
-          <section className="space-y-3 rounded-[28px] border border-white/70 bg-white/70 p-4">
+          <section className="space-y-3 border-t border-[#dedbe2] pt-5">
             <h2 className="text-lg font-extrabold text-[#242235]">
               Frontend adapter
             </h2>
@@ -119,7 +98,7 @@ export function ProfileView({ settings = false }: { settings?: boolean }) {
           </section>
         )}
 
-        <section className="rounded-[28px] border border-[#d7eadf] bg-[#effaf6] p-4">
+        <section className="rounded-[26px] border border-[#d7eadf] bg-[#effaf6]/74 p-4 shadow-[0_14px_36px_rgba(47,45,58,0.05)]">
           <div className="flex items-start gap-3">
             <Lock className="mt-0.5 text-[#157464]" size={20} aria-hidden />
             <div>
@@ -138,34 +117,70 @@ export function ProfileView({ settings = false }: { settings?: boolean }) {
   );
 }
 
-function GoogleAccountPanel() {
-  const { data: session, status } = useSession();
-  const user = status === "authenticated" ? session?.user : undefined;
-  const signedIn = Boolean(user);
+function ProfileAvatar({
+  name,
+  image,
+}: {
+  name: string;
+  image?: string | null;
+}) {
+  const initial = (name.trim().charAt(0) || "L").toUpperCase();
 
   return (
-    <section className="rounded-[28px] border border-white/70 bg-white/70 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Pill tone={signedIn ? "emerald" : "gold"}>
-            {signedIn ? "Google connected" : "Google login"}
-          </Pill>
-          <h2 className="mt-3 text-lg font-extrabold text-[#242235]">
-            {signedIn ? "Signed in with Google" : "Connect your Google account"}
-          </h2>
-          <p className="mt-1 text-sm font-bold leading-6 text-[#716a7e]">
-            {signedIn
-              ? user?.email
-              : "Use the same Google OAuth flow as ShortArt for account access."}
-          </p>
-        </div>
-        {signedIn && (
-        <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-[#e7e4ec] text-sm font-black uppercase text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.82)_inset]">
-            {user?.name?.charAt(0) ?? "M"}
-          </span>
-        )}
-      </div>
-      <GoogleAuthButton className="mt-4" />
+    <span
+      className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-[22px] border border-white/80 bg-[#e7e4ec] text-xl font-black text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_14px_32px_rgba(42,39,55,0.12)]"
+      style={
+        image
+          ? {
+              backgroundImage: `url(${image})`,
+              backgroundPosition: "center",
+              backgroundSize: "cover",
+            }
+          : undefined
+      }
+      aria-label={image ? `${name} avatar` : undefined}
+    >
+      {!image && initial}
+    </span>
+  );
+}
+
+function ProfileSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h2 className="px-1 pb-2 text-xs font-black uppercase tracking-[0.22em] text-[#8f8994]">
+        {title}
+      </h2>
+      <div>{children}</div>
     </section>
+  );
+}
+
+function ProfileLinkRow({ item }: { item: (typeof profileItems)[number] }) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      className="flex items-center justify-between gap-4 rounded-[22px] px-3 py-3 text-[#343145] transition hover:bg-white/62"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-[16px] bg-[#e7e4ec] text-[#5f586f]">
+          <Icon size={17} aria-hidden />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-extrabold">{item.label}</span>
+          <span className="mt-0.5 block truncate text-xs font-bold text-[#8a8297]">
+            {item.description}
+          </span>
+        </span>
+      </span>
+      <ChevronRight className="shrink-0 text-[#5f586f]" size={17} aria-hidden />
+    </Link>
   );
 }

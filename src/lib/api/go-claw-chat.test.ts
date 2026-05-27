@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ChatProxyError,
   collectGoClawEventStream,
   extractGoClawAssistantText,
   sendMessageThroughChatProxy,
@@ -152,5 +153,27 @@ describe("GoClaw chat adapter", () => {
         content: "Hi",
       }),
     ).rejects.toThrow("Chat proxy returned an event stream without a body.");
+  });
+
+  it("preserves proxy error status and JSON messages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json(
+          { error: "Google sign-in is required." },
+          { status: 401 },
+        ),
+      ),
+    );
+
+    await expect(
+      sendMessageThroughChatProxy("/api/chat/completions", "conv", {
+        content: "Hi",
+      }),
+    ).rejects.toMatchObject({
+      name: "ChatProxyError",
+      message: "Google sign-in is required.",
+      status: 401,
+    } satisfies Partial<ChatProxyError>);
   });
 });

@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render";
 import { ChatView } from "./chat-view";
+import { ChatProxyError } from "@/lib/api/go-claw-chat";
 import type { SendMessageInput } from "@/types/lumi";
 
 const apiMocks = vi.hoisted(() => ({
@@ -28,7 +29,9 @@ vi.mock("next-auth/react", () => ({
 
 describe("ChatView", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     window.localStorage.clear();
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = "google-client";
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:look");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     apiMocks.listConversations.mockResolvedValue([
@@ -103,6 +106,45 @@ describe("ChatView", () => {
         inputContext: expect.objectContaining({ mode: "text" }),
       }),
     );
+  });
+
+  it("sends on Enter and keeps Shift Enter for multiline drafts", async () => {
+    renderWithQueryClient(<ChatView />);
+
+    const input = await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(input, { target: { value: "Line one" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter", shiftKey: true });
+
+    expect(apiMocks.sendMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(apiMocks.sendMessage).toHaveBeenCalledTimes(1));
+    expect(apiMocks.sendMessage).toHaveBeenCalledWith(
+      "conv-1",
+      expect.objectContaining({
+        content: "Line one",
+        scenario: "text_chat",
+      }),
+    );
+  });
+
+  it("prompts users to sign in when message sending is unauthenticated", async () => {
+    apiMocks.sendMessage.mockRejectedValueOnce(
+      new ChatProxyError("Google sign-in is required.", 401),
+    );
+
+    renderWithQueryClient(<ChatView />);
+
+    const input = await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(input, { target: { value: "你好" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(
+      await screen.findByText("Sign in to send messages to Mochi."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Sign in" }).length).toBeGreaterThan(1);
+    expect(screen.queryByText("The thread snagged.")).not.toBeInTheDocument();
   });
 
   it("uploads, removes, and sends image attachments", async () => {

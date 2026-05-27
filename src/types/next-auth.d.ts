@@ -16,6 +16,13 @@ interface GoClawAuthTenant {
 }
 
 declare module "next-auth" {
+  interface User {
+    goclawAccessToken?: string;
+    goclawExpiresAt?: string;
+    goclawUser?: GoClawAuthUser;
+    goclawTenant?: GoClawAuthTenant;
+  }
+
   interface Session {
     user?: DefaultSession["user"] & {
       id?: string;

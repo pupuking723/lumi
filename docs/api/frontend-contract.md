@@ -7,7 +7,7 @@ The frontend uses `src/lib/api/client.ts`. If `NEXT_PUBLIC_API_BASE_URL` is empt
 - Frontend proxy: `POST /api/chat/completions`.
 - Upstream endpoint: `POST http://192.168.6.203:9600/v1/chat/completions`.
 - Upstream model: `agent:fox-spirit`.
-- Auth flow: NextAuth Google sign-in exchanges the Google `id_token`/`access_token` with `POST /v1/auth/google/login`.
+- Auth flow: NextAuth Google sign-in exchanges the Google `id_token`/`access_token` with `POST /v1/auth/google/login`. Google One Tap uses GIS `credential` through the NextAuth `google-one-tap` credentials provider.
 - Upstream headers: `Accept-Language: zh`, `Authorization: Bearer <goclaw-user-session-token>`.
 - Request shape sent upstream: `{ model, messages, stream: true }`.
 - Response shape expected upstream: `text/event-stream` chunks shaped like `data: {"choices":[{"delta":{"content":"..."}}]}` and ending with `data: [DONE]`.

@@ -29,15 +29,34 @@ describe("GoogleAuthButton", () => {
     });
   });
 
-  it("signs out authenticated users", () => {
+  it("shows the account menu before signing out authenticated users", () => {
     authMocks.useSession.mockReturnValue({
-      data: { user: { name: "Mochi" } },
+      data: { user: { name: "Mochi", email: "mochi@example.com" } },
       status: "authenticated",
     });
     render(<GoogleAuthButton />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+
+    expect(screen.getByText("mochi@example.com")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
 
     expect(authMocks.signOut).toHaveBeenCalledWith({ callbackUrl: "/" });
+  });
+
+  it("renders the authenticated user's avatar when available", () => {
+    authMocks.useSession.mockReturnValue({
+      data: {
+        user: {
+          name: "Mochi",
+          email: "mochi@example.com",
+          image: "https://avatar.test/mochi.png",
+        },
+      },
+      status: "authenticated",
+    });
+    render(<GoogleAuthButton />);
+
+    expect(document.querySelector('img[src="https://avatar.test/mochi.png"]')).toBeTruthy();
   });
 });

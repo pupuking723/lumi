@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+} from "react";
 import Image from "next/image";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -18,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { cn } from "@/lib/utils";
 import type { LiveConnectionStatus } from "@/lib/live/ws-client";
 import type { ChatMessage } from "@/types/lumi";
@@ -28,12 +35,14 @@ export function ChatMessagesPanel({
   messages,
   showPendingIndicator,
   showSendError,
+  sendErrorKind,
   onRetry,
 }: {
   messageScrollRef: RefObject<HTMLElement | null>;
   messages: ChatMessage[];
   showPendingIndicator: boolean;
   showSendError: boolean;
+  sendErrorKind: "auth" | "generic";
   onRetry: () => void;
 }) {
   return (
@@ -55,7 +64,13 @@ export function ChatMessagesPanel({
                 </span>
               </div>
             )}
-            {showSendError && (
+            {showSendError && sendErrorKind === "auth" && (
+              <div className="lumi-fade-in space-y-2 rounded-[22px] border border-[#d8d6ee] bg-[#f7f4ff]/90 p-3 text-sm font-bold text-[#51466c] backdrop-blur-xl">
+                <p>Sign in to send messages to Mochi.</p>
+                <GoogleAuthButton compact className="w-full" />
+              </div>
+            )}
+            {showSendError && sendErrorKind === "generic" && (
               <div className="lumi-fade-in rounded-[22px] border border-[#ead1d8] bg-[#fff3f5]/86 p-3 text-sm font-bold text-[#9c4a61] backdrop-blur-xl">
                 The thread snagged.{" "}
                 <button type="button" className="underline" onClick={onRetry}>
@@ -96,6 +111,14 @@ export function ChatComposer({
   onRemoveAttachment: (localId: string) => void;
 }) {
   const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    onSubmit();
+  };
+  const handleDraftKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+
     event.preventDefault();
     onSubmit();
   };
@@ -149,6 +172,7 @@ export function ChatComposer({
             onInput={(event) =>
               onDraftChange((event.currentTarget as HTMLTextAreaElement).value)
             }
+            onKeyDown={handleDraftKeyDown}
             placeholder="Ask Mochi..."
             rows={1}
             className="h-11 max-h-[4.875rem] min-h-11 flex-1 resize-none rounded-[24px] border-0 bg-transparent py-3 pl-1 pr-3 text-sm font-extrabold text-[#2b2938] shadow-none outline-none transition placeholder:text-[#9d96ab] focus:bg-transparent focus:shadow-none"
