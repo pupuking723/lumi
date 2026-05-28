@@ -7,19 +7,12 @@ import {
   Bell,
   ChevronRight,
   Lock,
-  Settings,
 } from "lucide-react";
 import { AppChrome } from "./app-chrome";
 import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 import { apiClient } from "@/lib/api/client";
 
 const profileItems = [
-  {
-    label: "Settings",
-    description: "Account, language, display preferences",
-    href: "/profile/settings",
-    icon: Settings,
-  },
   {
     label: "Notifications",
     description: "Message alerts, Live reminders, look recaps",

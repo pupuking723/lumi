@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { Session } from "next-auth";
-import { Brain, Menu, MessageCircle, UserRound, X } from "lucide-react";
+import { Menu, MessageCircle, UserRound, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Sheet,
@@ -18,7 +18,6 @@ import { GoogleAuthButton } from "@/components/auth/google-auth-button";
 
 const navItems = [
   { href: "/chat", label: "Chat", icon: MessageCircle },
-  { href: "/memory", label: "Memory", icon: Brain },
   { href: "/profile", label: "Me", icon: UserRound },
 ];
 
