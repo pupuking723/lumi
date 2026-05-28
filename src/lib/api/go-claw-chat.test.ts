@@ -41,7 +41,12 @@ describe("GoClaw chat adapter", () => {
               "<media:image>\n\n<mochi_multimodal_context>\n- scenario: image_review\n</mochi_multimodal_context>\n\nDoes this work?",
             created_at: "2026-05-27T03:10:00Z",
             media_refs: [
-              { id: "media-1", kind: "image", mime_type: "image/png" },
+              {
+                id: "media-1",
+                kind: "image",
+                mime_type: "image/png",
+                preview_url: "https://cdn.example.com/look.png",
+              },
             ],
           },
           {
@@ -68,6 +73,7 @@ describe("GoClaw chat adapter", () => {
             media_id: "media-1",
             source: "chat",
             role: "user",
+            previewUrl: "https://cdn.example.com/look.png",
             mimeType: "image/png",
           },
         ],
