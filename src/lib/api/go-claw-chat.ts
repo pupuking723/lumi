@@ -39,6 +39,8 @@ interface GoClawSessionMessage {
     id?: string;
     kind?: string;
     mime_type?: string;
+    url?: string;
+    preview_url?: string;
   }>;
 }
 
@@ -148,6 +150,7 @@ export function toLumiChatMessages(
           media_id: ref.id as string,
           source: "chat" as const,
           role: "user" as const,
+          previewUrl: ref.preview_url ?? ref.url,
           mimeType: ref.mime_type,
         }));
       const content = cleanHistoryContent(message.content ?? "");
