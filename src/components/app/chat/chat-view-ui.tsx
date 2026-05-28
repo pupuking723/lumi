@@ -43,6 +43,7 @@ export function ChatMessagesPanel({
   showPendingIndicator,
   showSendError,
   sendErrorKind,
+  authPromptKind = "message",
   onRetry,
   onCreateOotdReport,
   ootdReportStatusByMediaId,
@@ -53,6 +54,7 @@ export function ChatMessagesPanel({
   showPendingIndicator: boolean;
   showSendError: boolean;
   sendErrorKind: "auth" | "generic";
+  authPromptKind?: "message" | "voice";
   onRetry: () => void;
   onCreateOotdReport: (attachment: ChatAttachment, imageUrl?: string) => void;
   ootdReportStatusByMediaId?: Record<
@@ -93,7 +95,11 @@ export function ChatMessagesPanel({
             )}
             {showSendError && sendErrorKind === "auth" && (
               <div className="lumi-fade-in space-y-2 rounded-[22px] border border-[#d8d6ee] bg-[#f7f4ff]/90 p-3 text-sm font-bold text-[#51466c] backdrop-blur-xl">
-                <p>Sign in to send messages to Mochi.</p>
+                <p>
+                  {authPromptKind === "voice"
+                    ? "Sign in to use live voice with Mochi."
+                    : "Sign in to send messages to Mochi."}
+                </p>
                 <GoogleAuthButton compact className="w-full" />
               </div>
             )}

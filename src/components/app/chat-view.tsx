@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
 import { AppChrome } from "./app-chrome";
 import {
   BottomActionControls,
@@ -117,6 +118,7 @@ function summarizeOotdReport(report: OotdReport) {
 }
 
 export function ChatView() {
+  const { status: authStatus } = useSession();
   const queryClient = useQueryClient();
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -167,6 +169,7 @@ export function ChatView() {
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
   const [lastSendStopped, setLastSendStopped] = useState(false);
   const [uploadAuthRequired, setUploadAuthRequired] = useState(false);
+  const [voiceAuthRequired, setVoiceAuthRequired] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<LiveConnectionStatus>("idle");
   const [voiceError, setVoiceError] = useState("");
@@ -1402,6 +1405,7 @@ export function ChatView() {
   const onFilesSelected = (files: FileList | null) => {
     if (!files?.length) return;
     setUploadAuthRequired(false);
+    setVoiceAuthRequired(false);
 
     Array.from(files)
       .filter((file) => file.type.startsWith("image/"))
@@ -1501,9 +1505,24 @@ export function ChatView() {
     abortControllerRef.current?.abort();
   };
 
+  const handleStartVoice = () => {
+    if (authStatus !== "authenticated") {
+      setChatPanelOpen(true);
+      setMediaSheetOpen(false);
+      setUploadAuthRequired(false);
+      setVoiceAuthRequired(true);
+      return;
+    }
+
+    setVoiceAuthRequired(false);
+    setChatPanelOpen(false);
+    void startVoiceSession();
+  };
+
   const submit = (payload?: SendMessageInput) => {
     if (!conversationId) return;
     if (!payload && (hasUploadingAttachments || hasFailedAttachments)) return;
+    setVoiceAuthRequired(false);
 
     const content = payload?.content ?? draft.trim();
     const messageContent = content || DEFAULT_IMAGE_REVIEW_PROMPT;
@@ -1611,13 +1630,18 @@ export function ChatView() {
             composerExpanded={attachments.length > 0}
             showPendingIndicator={showPendingIndicator}
             showSendError={
-              uploadAuthRequired || (sendMutation.isError && !lastSendStopped)
+              voiceAuthRequired ||
+              uploadAuthRequired ||
+              (sendMutation.isError && !lastSendStopped)
             }
             sendErrorKind={
-              uploadAuthRequired || isUnauthenticatedError(sendMutation.error)
+              voiceAuthRequired ||
+              uploadAuthRequired ||
+              isUnauthenticatedError(sendMutation.error)
                 ? "auth"
                 : "generic"
             }
+            authPromptKind={voiceAuthRequired ? "voice" : "message"}
             onRetry={() => lastPayload && submit(lastPayload)}
             onCreateOotdReport={openOotdReportForAttachment}
             ootdReportStatusByMediaId={ootdStatusByMediaId}
@@ -1682,10 +1706,7 @@ export function ChatView() {
         }
         onSend={() => submit()}
         onStopGeneration={stopGeneration}
-        onStartVoice={() => {
-          setChatPanelOpen(false);
-          void startVoiceSession();
-        }}
+        onStartVoice={handleStartVoice}
         onStopVoice={() => stopVoiceSession()}
         onOpenChat={() => setChatPanelOpen(true)}
         onCloseChat={() => setChatPanelOpen(false)}

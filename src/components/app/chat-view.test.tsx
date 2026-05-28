@@ -15,6 +15,12 @@ const apiMocks = vi.hoisted(() => ({
   createOotdShareCard: vi.fn(),
 }));
 
+const authMocks = vi.hoisted(() => ({
+  useSession: vi.fn(),
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+}));
+
 vi.mock("@/lib/api/client", () => ({
   apiClient: apiMocks,
 }));
@@ -24,14 +30,18 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next-auth/react", () => ({
-  useSession: () => ({ data: null, status: "unauthenticated" }),
-  signIn: vi.fn(),
-  signOut: vi.fn(),
+  useSession: authMocks.useSession,
+  signIn: authMocks.signIn,
+  signOut: authMocks.signOut,
 }));
 
 describe("ChatView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authMocks.useSession.mockReturnValue({
+      data: null,
+      status: "unauthenticated",
+    });
     window.localStorage.clear();
     process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID = "google-client";
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:look");
@@ -628,6 +638,24 @@ ${JSON.stringify({
     expect(screen.queryByText("Uploading...")).not.toBeInTheDocument();
   });
 
+  it("prompts users to sign in before starting live voice", async () => {
+    const getUserMedia = vi.fn();
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia },
+      configurable: true,
+    });
+
+    renderWithQueryClient(<ChatView />);
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.click(screen.getByRole("button", { name: "Start live voice chat" }));
+
+    expect(
+      await screen.findByText("Sign in to use live voice with Mochi."),
+    ).toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
   it("creates an OOTD report from an uploaded image", async () => {
     const { container } = renderWithQueryClient(<ChatView />);
     const fileInput = container.querySelector(
@@ -737,6 +765,15 @@ ${JSON.stringify({
   });
 
   it("sends image uploads directly to the live agent while voice is active", async () => {
+    authMocks.useSession.mockReturnValue({
+      data: {
+        user: {
+          name: "Wenyu Liu",
+          email: "wenyu@example.com",
+        },
+      },
+      status: "authenticated",
+    });
     const sentPayloads: string[] = [];
     class MockWebSocket extends EventTarget {
       static CONNECTING = 0;
