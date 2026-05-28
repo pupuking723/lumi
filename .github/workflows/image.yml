@@ -36,7 +36,7 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
-            NEXT_PUBLIC_LUMI_LIVE_WS_URL=ws://216.128.159.73:18790/v1/closy/live/gemini/ws
+            NEXT_PUBLIC_LUMI_LIVE_WS_URL=wss://lumiai.club/v1/closy/live/gemini/ws
             NEXT_PUBLIC_LUMI_LIVE_SESSION_PATH=/api/live/session
             NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH=/api/chat/completions
             NEXT_PUBLIC_LUMI_UPLOAD_PROXY_PATH=/api/chat/attachments/upload
