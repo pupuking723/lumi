@@ -12,9 +12,16 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: "#f7eff9",
     icons: [
       {
-        src: "/mochi/mochi-main.webp",
-        sizes: "860x646",
-        type: "image/webp",
+        src: "/icons/lumi-icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "any maskable",
+      },
+      {
+        src: "/icons/lumi-icon-512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any maskable",
       },
     ],
   };

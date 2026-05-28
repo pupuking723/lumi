@@ -75,7 +75,7 @@ export function GoogleAuthButton({ compact = false, className }: { compact?: boo
         </button>
 
         {menuOpen && (
-          <div role="menu" className={cn('absolute right-0 top-[calc(100%+0.5rem)] z-50 w-64 overflow-hidden rounded-[8px] border border-white/80 bg-[#fffdf8]/96 p-2 text-[#302d43] shadow-[0_18px_48px_rgba(57,49,73,0.18)] backdrop-blur-xl', !compact && 'left-0 right-auto w-full min-w-64')}>
+          <div role="menu" className={cn('absolute right-0 top-[calc(100%+0.5rem)] z-[80] w-64 overflow-hidden rounded-[8px] border border-white/80 bg-[#fffdf8]/96 p-2 text-[#302d43] shadow-[0_18px_48px_rgba(57,49,73,0.18)] backdrop-blur-xl', !compact && 'left-0 right-auto w-full min-w-64')}>
             <div className="flex items-center gap-3 border-b border-[#e8e0dd] px-2 py-2.5">
               <UserAvatar image={avatarUrl} name={userName} email={userEmail} />
               <div className="min-w-0">

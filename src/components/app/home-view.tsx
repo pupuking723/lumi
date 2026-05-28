@@ -4,9 +4,8 @@ import { useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { Heart, MessageCircle, Star } from "lucide-react";
+import { Heart, MessageCircle } from "lucide-react";
 import { GoogleAuthButton } from "@/components/auth/google-auth-button";
-import { Pill } from "@/components/ui/pill";
 import { cn } from "@/lib/utils";
 
 const featureCards = [

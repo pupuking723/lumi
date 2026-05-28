@@ -68,7 +68,7 @@ export function AppChrome({
             lockedViewport ? "h-dvh overflow-hidden" : "min-h-dvh",
           )}
         >
-          <header className="sticky top-0 z-20 shrink-0 px-5 pb-3 pt-[calc(0.9rem+env(safe-area-inset-top))] md:hidden">
+          <header className="sticky top-0 z-[70] shrink-0 px-5 pb-3 pt-[calc(0.9rem+env(safe-area-inset-top))] md:hidden">
             <div className="mx-auto w-full max-w-[760px]">
               <div className="flex items-center justify-between md:hidden">
                 <div className="flex items-center gap-3">
