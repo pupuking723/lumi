@@ -118,6 +118,7 @@ export function ChatView() {
   );
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
   const [lastSendStopped, setLastSendStopped] = useState(false);
+  const [uploadAuthRequired, setUploadAuthRequired] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<LiveConnectionStatus>("idle");
   const [voiceError, setVoiceError] = useState("");
@@ -1223,6 +1224,7 @@ export function ChatView() {
 
   const onFilesSelected = (files: FileList | null) => {
     if (!files?.length) return;
+    setUploadAuthRequired(false);
 
     Array.from(files)
       .filter((file) => file.type.startsWith("image/"))
@@ -1276,6 +1278,18 @@ export function ChatView() {
             );
           })
           .catch((error: unknown) => {
+            if (isUnauthenticatedError(error)) {
+              if (previewUrl) {
+                URL.revokeObjectURL(previewUrl);
+                attachmentUrlsRef.current.delete(previewUrl);
+              }
+              setAttachments((current) =>
+                current.filter((attachment) => attachment.localId !== localId),
+              );
+              setUploadAuthRequired(true);
+              return;
+            }
+
             if (voiceActive) {
               if (previewUrl) {
                 URL.revokeObjectURL(previewUrl);
@@ -1368,15 +1382,27 @@ export function ChatView() {
       fixedViewport
       mainClassName="relative min-h-0 overflow-hidden !p-0"
     >
+      <div
+        className="pointer-events-none fixed inset-y-0 left-0 right-0 bg-cover bg-center md:left-[264px]"
+        style={{
+          backgroundImage:
+            "linear-gradient(180deg, rgba(248, 243, 255, 0.12) 0%, rgba(255, 238, 245, 0.2) 58%, rgba(245, 224, 248, 0.3) 100%), url('/chat/mochi-bg.webp')",
+        }}
+        aria-hidden
+      />
       {chatPanelOpen && (
         <>
           <ChatMessagesPanel
             messageScrollRef={messageScrollRef}
             messages={messages}
             showPendingIndicator={showPendingIndicator}
-            showSendError={sendMutation.isError && !lastSendStopped}
+            showSendError={
+              uploadAuthRequired || (sendMutation.isError && !lastSendStopped)
+            }
             sendErrorKind={
-              isUnauthenticatedError(sendMutation.error) ? "auth" : "generic"
+              uploadAuthRequired || isUnauthenticatedError(sendMutation.error)
+                ? "auth"
+                : "generic"
             }
             onRetry={() => lastPayload && submit(lastPayload)}
           />

@@ -68,6 +68,7 @@ describe("GoClaw chat adapter", () => {
         role: "user",
         kind: "image",
         content: "Does this work?",
+        imageUrl: "https://cdn.example.com/look.png",
         attachments: [
           {
             media_id: "media-1",
@@ -86,9 +87,45 @@ describe("GoClaw chat adapter", () => {
         role: "mochi",
         kind: "text",
         content: "Yes, sharpen the shoe.",
+        imageUrl: undefined,
         attachments: undefined,
         status: "sent",
         createdAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("extracts image urls from embedded media tags in session history", () => {
+    expect(
+      toLumiChatMessages("conv", {
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            content:
+              '<media:image url="https://cdn.example.com/upload.jpg?X-Amz-Signature=test" id="media-1">\n\n<mochi_multimodal_context>\n- scenario: image_review\n</mochi_multimodal_context>\n\nReview this',
+            created_at: "2026-05-28T06:48:32Z",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: "u1",
+        conversationId: "conv",
+        role: "user",
+        kind: "image",
+        content: "Review this",
+        imageUrl: "https://cdn.example.com/upload.jpg?X-Amz-Signature=test",
+        attachments: [
+          {
+            media_id: "media-1",
+            source: "chat",
+            role: "user",
+            previewUrl: "https://cdn.example.com/upload.jpg?X-Amz-Signature=test",
+          },
+        ],
+        status: "sent",
+        createdAt: "2026-05-28T06:48:32Z",
       },
     ]);
   });

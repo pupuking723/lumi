@@ -47,7 +47,7 @@ export function ChatMessagesPanel({
   onRetry: () => void;
 }) {
   return (
-    <div className="fixed right-4 top-[6.5rem] bottom-[calc(4.65rem+env(safe-area-inset-bottom))] z-20 flex w-[66.666vw] max-w-[520px] flex-col overflow-hidden rounded-[24px] bg-transparent p-3 md:right-[max(1rem,calc((100vw-760px)/2+1rem))]">
+    <div className="fixed right-4 top-[6.5rem] bottom-[calc(4.65rem+env(safe-area-inset-bottom))] z-20 flex w-[66.666vw] max-w-[520px] flex-col overflow-hidden rounded-[24px] bg-transparent p-3 md:right-[max(1rem,calc((100vw-264px-760px)/2+1rem))]">
       <div className="relative flex min-h-0 flex-1 flex-col">
         <section
           ref={messageScrollRef}
@@ -127,10 +127,10 @@ export function ChatComposer({
   return (
     <div
       className={cn(
-        "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 z-30 md:left-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]",
+        "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 z-30 md:left-[calc(264px+max(1.5rem,calc((100vw-264px-760px)/2+1.5rem)))]",
         voiceActive && !sendControlActive
-          ? "right-[11.5rem] md:right-[max(11.5rem,calc((100vw-760px)/2+11.5rem))]"
-          : "right-[8.75rem] md:right-[max(8.75rem,calc((100vw-760px)/2+8.75rem))]",
+          ? "right-[11.5rem] md:right-[calc(max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))+10rem)]"
+          : "right-[8.75rem] md:right-[calc(max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))+7.25rem)]",
       )}
     >
       <form
@@ -256,7 +256,7 @@ export function MediaMenuLayer({
         onClick={onClose}
         className="media-menu-scrim fixed inset-0 z-[45] bg-[#171321]/32"
       />
-      <div className="media-menu-rise fixed bottom-[calc(4.35rem+env(safe-area-inset-bottom))] left-6 z-50 flex w-[9.75rem] flex-col gap-2 md:left-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]">
+      <div className="media-menu-rise fixed bottom-[calc(4.35rem+env(safe-area-inset-bottom))] left-6 z-50 flex w-[9.75rem] flex-col gap-2 md:left-[calc(264px+max(1.5rem,calc((100vw-264px-760px)/2+1.5rem)))]">
         <MediaMenuButton
           icon={<Camera size={14} aria-hidden />}
           label="Take a photo"
@@ -275,7 +275,7 @@ export function MediaMenuLayer({
           variant="secondary"
           size="icon"
           onClick={onClose}
-          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 z-[55] rounded-[20px] !bg-white text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:!bg-white md:left-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]"
+          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 z-[55] rounded-[20px] !bg-white text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:!bg-white md:left-[calc(264px+max(1.5rem,calc((100vw-264px-760px)/2+1.5rem)))]"
         >
           <Plus
             size={20}
@@ -302,7 +302,7 @@ export function StandaloneMediaButton({
       onClick={onToggle}
       variant="secondary"
       className={cn(
-        "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 rounded-[24px] text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] md:left-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]",
+        "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] left-6 rounded-[24px] text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] md:left-[calc(264px+max(1.5rem,calc((100vw-264px-760px)/2+1.5rem)))]",
         open ? "z-[55] !bg-white hover:!bg-white" : "z-40",
       )}
     />
@@ -403,7 +403,7 @@ export function BottomActionControls({
           size="icon"
           onClick={sendPending ? onStopGeneration : onSend}
           disabled={sendDisabled}
-          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full bg-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(42,39,55,0.24)] hover:bg-[#3d394f] md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]"
+          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full bg-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(42,39,55,0.24)] hover:bg-[#3d394f] md:right-[max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))]"
         >
           {sendPending ? (
             <Square size={17} aria-hidden />
@@ -423,7 +423,7 @@ export function BottomActionControls({
           variant="secondary"
           size="icon"
           onClick={onStartVoice}
-          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43] md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]"
+          className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43] md:right-[max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))]"
         >
           <Mic size={19} aria-hidden />
         </Button>
@@ -436,8 +436,8 @@ export function BottomActionControls({
         className={cn(
           "fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] z-40 rounded-full",
           voiceActive && !sendControlActive
-            ? "right-[7.25rem] md:right-[max(7.25rem,calc((100vw-760px)/2+7.25rem))]"
-            : "right-[5rem] md:right-[max(5rem,calc((100vw-760px)/2+5rem))]",
+            ? "right-[7.25rem] md:right-[calc(max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))+5.75rem)]"
+            : "right-[5rem] md:right-[calc(max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))+3.5rem)]",
           chatPanelOpen
             ? "bg-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_18px_42px_rgba(42,39,55,0.24)] hover:bg-[#3d394f]"
             : "text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43]",
@@ -465,7 +465,7 @@ function VoiceActiveControl({
   const micPaused = voiceStatus === "responding";
 
   return (
-    <div className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 inline-flex h-11 items-center overflow-hidden rounded-full border border-white/75 bg-[#f7f6f8]/86 text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] backdrop-blur-xl md:right-[max(1.5rem,calc((100vw-760px)/2+1.5rem))]">
+    <div className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 inline-flex h-11 items-center overflow-hidden rounded-full border border-white/75 bg-[#f7f6f8]/86 text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] backdrop-blur-xl md:right-[max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))]">
       <button
         type="button"
         aria-label="End live voice chat"
@@ -554,9 +554,10 @@ function MessageItem({ message }: { message: ChatMessage }) {
     <div className="flex justify-end">
       <div
         className={cn(
-          "max-w-[84%] overflow-hidden break-words rounded-[24px] px-3.5 py-2.5 text-sm font-bold leading-5 [overflow-wrap:anywhere]",
-          "bg-[#2c293d] text-white",
-          message.status === "failed" && "bg-[#8f334d]",
+          "max-w-[84%] break-words rounded-[24px] rounded-br-[4px] border px-3.5 py-2.5 text-sm font-bold leading-5 shadow-[0_1px_0_rgba(255,255,255,0.72)_inset,0_12px_28px_rgba(154,92,132,0.16)] backdrop-blur-xl [overflow-wrap:anywhere]",
+          "border-white/72 bg-[#ffe3ef]/82 text-[#4a2f45]",
+          message.status === "failed" &&
+            "border-[#f0b9c7]/80 bg-[#9c4a61] text-white",
         )}
       >
         {message.imageUrl && (
@@ -686,7 +687,7 @@ function ChatImagePreviewOverlay({
 function AgentBubble({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex justify-start">
-      <div className="max-w-[88%] overflow-hidden break-words rounded-[24px] border border-white/72 bg-white/64 px-3.5 py-2.5 text-sm font-bold leading-5 text-[#343145] backdrop-blur-xl [overflow-wrap:anywhere]">
+      <div className="max-w-[88%] break-words rounded-[24px] rounded-bl-[4px] border border-white/72 bg-white/64 px-3.5 py-2.5 text-sm font-bold leading-5 text-[#343145] backdrop-blur-xl [overflow-wrap:anywhere]">
         {children}
       </div>
     </div>

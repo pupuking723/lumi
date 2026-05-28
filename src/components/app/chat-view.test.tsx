@@ -196,6 +196,29 @@ describe("ChatView", () => {
     );
   });
 
+  it("prompts users to sign in when image upload is unauthenticated", async () => {
+    apiMocks.uploadAttachment.mockRejectedValueOnce(
+      new ChatProxyError("Google sign-in is required.", 401),
+    );
+
+    const { container } = renderWithQueryClient(<ChatView />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["image"], "look.png", { type: "image/png" })],
+      },
+    });
+
+    expect(
+      await screen.findByText("Sign in to send messages to Mochi."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Sign in" }).length).toBeGreaterThan(1);
+    expect(screen.queryByText("Upload failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Uploading...")).not.toBeInTheDocument();
+  });
+
   it("sends image uploads directly to the live agent while voice is active", async () => {
     const sentPayloads: string[] = [];
     class MockWebSocket extends EventTarget {

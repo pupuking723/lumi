@@ -130,6 +130,33 @@ function cleanHistoryContent(content: string) {
     .trim();
 }
 
+function extractHistoryMediaRefs(content: string) {
+  const refs: Array<{
+    media_id: string;
+    source: "chat";
+    role: "user";
+    previewUrl: string;
+    mimeType?: string;
+  }> = [];
+  const mediaTagPattern = /<media:image\b([^>]*)>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = mediaTagPattern.exec(content)) !== null) {
+    const attributes = match[1] ?? "";
+    const url = attributes.match(/\burl=(["'])(.*?)\1/)?.[2];
+    if (!url) continue;
+
+    refs.push({
+      media_id: attributes.match(/\bid=(["'])(.*?)\1/)?.[2] ?? url,
+      source: "chat",
+      role: "user",
+      previewUrl: url,
+    });
+  }
+
+  return refs;
+}
+
 export function toLumiChatMessages(
   conversationId: string,
   payload: GoClawSessionMessages,
@@ -144,6 +171,7 @@ export function toLumiChatMessages(
             : null;
       if (!role) return null;
 
+      const contentWithMediaTags = message.content ?? "";
       const attachments = (message.media_refs ?? [])
         .filter((ref) => ref.id)
         .map((ref) => ({
@@ -152,16 +180,21 @@ export function toLumiChatMessages(
           role: "user" as const,
           previewUrl: ref.preview_url ?? ref.url,
           mimeType: ref.mime_type,
-        }));
-      const content = cleanHistoryContent(message.content ?? "");
+        }))
+        .concat(extractHistoryMediaRefs(contentWithMediaTags));
+      const imageUrl = attachments.find((attachment) =>
+        attachment.previewUrl?.trim(),
+      )?.previewUrl;
+      const content = cleanHistoryContent(contentWithMediaTags);
       if (!content && attachments.length === 0) return null;
 
       return {
         id: message.id ?? makeMessageId("msg-history", String(index)),
         conversationId,
         role,
-        kind: attachments.length > 0 ? "image" : "text",
+        kind: imageUrl ? "image" : "text",
         content: content || "Can you review this look?",
+        imageUrl,
         attachments: attachments.length > 0 ? attachments : undefined,
         status: "sent",
         createdAt: message.created_at || now(),
