@@ -1,4 +1,5 @@
 import type {
+  ChatAttachment,
   ChatMessage,
   SendMessageInput,
   SendMessageResult,
@@ -130,14 +131,8 @@ function cleanHistoryContent(content: string) {
     .trim();
 }
 
-function extractHistoryMediaRefs(content: string) {
-  const refs: Array<{
-    media_id: string;
-    source: "chat";
-    role: "user";
-    previewUrl: string;
-    mimeType?: string;
-  }> = [];
+function extractHistoryMediaRefs(content: string): ChatAttachment[] {
+  const refs: ChatAttachment[] = [];
   const mediaTagPattern = /<media:image\b([^>]*)>/g;
   let match: RegExpExecArray | null;
 
@@ -172,7 +167,7 @@ export function toLumiChatMessages(
       if (!role) return null;
 
       const contentWithMediaTags = message.content ?? "";
-      const attachments = (message.media_refs ?? [])
+      const mediaRefAttachments: ChatAttachment[] = (message.media_refs ?? [])
         .filter((ref) => ref.id)
         .map((ref) => ({
           media_id: ref.id as string,
@@ -180,8 +175,11 @@ export function toLumiChatMessages(
           role: "user" as const,
           previewUrl: ref.preview_url ?? ref.url,
           mimeType: ref.mime_type,
-        }))
-        .concat(extractHistoryMediaRefs(contentWithMediaTags));
+        }));
+      const attachments = [
+        ...mediaRefAttachments,
+        ...extractHistoryMediaRefs(contentWithMediaTags),
+      ];
       const imageUrl = attachments.find((attachment) =>
         attachment.previewUrl?.trim(),
       )?.previewUrl;
