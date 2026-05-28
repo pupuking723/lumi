@@ -17,7 +17,12 @@ import {
   MediaMenuLayer,
   StandaloneMediaButton,
 } from "./chat/chat-view-ui";
+import {
+  downloadOotdLongImage,
+  OotdReportModal,
+} from "./ootd-report-modal";
 import { apiClient } from "@/lib/api/client";
+import { isOotdReportChatError } from "@/lib/api/go-claw-chat";
 import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
 import {
   bytesToBase64,
@@ -41,7 +46,10 @@ import {
 import { ChatProxyError } from "@/lib/api/go-claw-chat";
 import type { PendingAttachment } from "./chat/chat-types";
 import type {
+  ChatAttachment,
   ChatMessage,
+  OotdReport,
+  OotdShareCard,
   SendMessageInput,
   SendMessageResult,
 } from "@/types/lumi";
@@ -56,10 +64,26 @@ const LIVE_PRE_SPEECH_FRAME_LIMIT = 4;
 const LIVE_END_OF_SPEECH_MS = 500;
 const LIVE_CALIBRATION_FRAMES = 16;
 const LIVE_CONNECT_TIMEOUT_MS = 12000;
+const DEFAULT_IMAGE_REVIEW_PROMPT = "Can you review this look?";
 
-function isAbortError(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
-}
+type OotdReportState =
+  | {
+      status: "generating";
+      imageUrl?: string;
+      localId?: string;
+    }
+  | {
+      status: "ready";
+      report: OotdReport;
+      imageUrl?: string;
+      localId?: string;
+    }
+  | {
+      status: "failed";
+      error: string;
+      imageUrl?: string;
+      localId?: string;
+    };
 
 function isUnauthenticatedError(error: unknown) {
   return (
@@ -67,6 +91,29 @@ function isUnauthenticatedError(error: unknown) {
     (error instanceof Error &&
       /Google sign-in is required|unauthorized|401/i.test(error.message))
   );
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function summarizeOotdReport(report: OotdReport) {
+  const suggestions = report.suggestions
+    .map((item) => `${item.title}: ${item.body}`)
+    .filter((item) => item.trim())
+    .slice(0, 2)
+    .join(" | ");
+  return [
+    `Judgment: ${report.todayJudgment.title} (${report.todayJudgment.score}/10, ${report.todayJudgment.label}).`,
+    report.todayJudgment.summary,
+    report.overallStyle ? `Style: ${report.overallStyle}.` : "",
+    report.highlights.length ? `Highlights: ${report.highlights.join("; ")}.` : "",
+    report.biggestIssue ? `Biggest issue: ${report.biggestIssue}.` : "",
+    suggestions ? `Suggestions: ${suggestions}.` : "",
+    report.mochiLine ? `Mochi line: ${report.mochiLine}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function ChatView() {
@@ -78,6 +125,7 @@ export function ChatView() {
   const messageScrollRef = useRef<HTMLElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const attachmentUrlsRef = useRef<Set<string>>(new Set());
+  const ootdReportByMediaIdRef = useRef<Record<string, OotdReportState>>({});
   const audioContextRef = useRef<AudioContext | null>(null);
   const captureAudioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -126,6 +174,20 @@ export function ChatView() {
   const [streamingAssistantId, setStreamingAssistantId] = useState<
     string | null
   >(null);
+  const [ootdReportOpen, setOotdReportOpen] = useState(false);
+  const [ootdShareCard, setOotdShareCard] = useState<OotdShareCard | null>(
+    null,
+  );
+  const [ootdActiveMediaId, setOotdActiveMediaId] = useState<string | null>(
+    null,
+  );
+  const [ootdReportByMediaId, setOotdReportByMediaId] = useState<
+    Record<string, OotdReportState>
+  >({});
+  const [activeOotdReportId, setActiveOotdReportId] = useState<string | null>(
+    null,
+  );
+  const [activeOotdReportSummary, setActiveOotdReportSummary] = useState("");
 
   const conversationQuery = useQuery({
     queryKey: ["mochi-conversation"],
@@ -146,7 +208,7 @@ export function ChatView() {
     enabled: Boolean(conversationId && sessionId),
     queryFn: () => apiClient.listMessages(conversationId as string, sessionId),
   });
-  const messages = messagesQuery.data ?? [];
+  const messages = useMemo(() => messagesQuery.data ?? [], [messagesQuery.data]);
   const hasUploadingAttachments = attachments.some(
     (attachment) => attachment.uploadStatus === "uploading",
   );
@@ -158,6 +220,19 @@ export function ChatView() {
     ? messages.find((message) => message.id === streamingAssistantId)
     : undefined;
   const lastMessageContent = messages.at(-1)?.content;
+  const activeOotdState = ootdActiveMediaId
+    ? ootdReportByMediaId[ootdActiveMediaId]
+    : undefined;
+  const ootdStatusByMediaId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(ootdReportByMediaId).map(([mediaId, state]) => [
+          mediaId,
+          state.status,
+        ]),
+      ),
+    [ootdReportByMediaId],
+  );
 
   const appendLiveMessage = useCallback(
     (content: string, role: ChatMessage["role"] = "mochi") => {
@@ -1040,7 +1115,7 @@ export function ChatView() {
         conversationId: conversationId as string,
         role: "user",
         kind: input.attachments?.length || input.imageUrl ? "image" : "text",
-        content: input.content || "Can you review this look?",
+        content: input.content || DEFAULT_IMAGE_REVIEW_PROMPT,
         imageUrl: input.imageUrl,
         attachments: input.attachments,
         status: "sent",
@@ -1132,6 +1207,19 @@ export function ChatView() {
         return;
       }
 
+      if (isOotdReportChatError(error)) {
+        queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
+          current
+            .filter((message) => message.id !== context.optimisticAssistantId)
+            .map((message) =>
+              message.id === context.optimisticId
+                ? { ...message, status: "sent" as const }
+                : message,
+            ),
+        );
+        return;
+      }
+
       queryClient.setQueryData<ChatMessage[]>(messagesKey, (current = []) =>
         current
           .filter((message) => message.id !== context.optimisticAssistantId)
@@ -1146,6 +1234,95 @@ export function ChatView() {
       abortControllerRef.current = null;
     },
   });
+  const setOotdMediaState = useCallback(
+    (mediaId: string, state: OotdReportState) => {
+      setOotdReportByMediaId((current) => {
+        const next = { ...current, [mediaId]: state };
+        ootdReportByMediaIdRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+  const ootdShareCardMutation = useMutation<OotdShareCard, Error, string>({
+    mutationFn: (reportId) => apiClient.createOotdShareCard(reportId),
+    onSuccess: (shareCard) => {
+      setOotdShareCard(shareCard);
+    },
+  });
+
+  const ensureOotdReportForAttachment = useCallback(
+    (
+      attachment: PendingAttachment | ChatAttachment,
+      options: {
+        imageUrl?: string;
+        note?: string;
+        open?: boolean;
+        sessionId?: string;
+      } = {},
+    ) => {
+      if (!attachment.media_id) return;
+
+      const mediaId = attachment.media_id;
+      const sourceImageUrl = options.imageUrl ?? attachment.previewUrl ?? "";
+      const localId = "localId" in attachment ? attachment.localId : undefined;
+      const existing = ootdReportByMediaIdRef.current[mediaId];
+      if (options.open) {
+        setOotdActiveMediaId(mediaId);
+        setOotdShareCard(null);
+        setOotdReportOpen(true);
+      }
+      if (existing) {
+        return;
+      }
+
+      setOotdMediaState(mediaId, {
+        status: "generating",
+        imageUrl: sourceImageUrl,
+        localId,
+      });
+      void apiClient
+        .createOotdReport({
+          media_id: mediaId,
+          session_id: options.sessionId,
+          scene: "daily",
+          note: options.note ?? draft.trim(),
+        })
+        .then((report) => {
+          setOotdMediaState(mediaId, {
+            status: "ready",
+            report,
+            imageUrl: sourceImageUrl || report.imageUrl,
+            localId,
+          });
+          setActiveOotdReportId(report.id);
+          setActiveOotdReportSummary(summarizeOotdReport(report));
+        })
+        .catch((error: unknown) => {
+          setOotdMediaState(mediaId, {
+            status: "failed",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Mochi could not create the OOTD report.",
+            imageUrl: sourceImageUrl,
+            localId,
+          });
+        });
+    },
+    [draft, setOotdMediaState],
+  );
+
+  const openOotdReportForAttachment = useCallback(
+    (attachment: PendingAttachment | ChatAttachment, imageUrl?: string) => {
+      ensureOotdReportForAttachment(attachment, {
+        imageUrl,
+        note: draft.trim(),
+        open: true,
+      });
+    },
+    [draft, ensureOotdReportForAttachment],
+  );
   const sendControlActive =
     chatPanelOpen &&
     !voiceActive &&
@@ -1329,6 +1506,7 @@ export function ChatView() {
     if (!payload && (hasUploadingAttachments || hasFailedAttachments)) return;
 
     const content = payload?.content ?? draft.trim();
+    const messageContent = content || DEFAULT_IMAGE_REVIEW_PROMPT;
     const readyAttachments =
       payload?.attachments ??
       attachments
@@ -1348,9 +1526,10 @@ export function ChatView() {
 
     const currentSessionId = sessionId || getOrCreateMochiSessionId();
     if (!sessionId) setSessionId(currentSessionId);
+    const includeOotdContext = readyAttachments.length === 0;
 
     const retryPayload: SendMessageInput = {
-      content: content || "Can you review this look?",
+      content: messageContent,
       imageUrl,
       attachments: readyAttachments,
       sessionId: currentSessionId,
@@ -1364,8 +1543,21 @@ export function ChatView() {
               ? "image"
               : "text",
         refers_to_media_id: readyAttachments[0]?.media_id,
+        refers_to_ootd_report_id: includeOotdContext
+          ? (activeOotdReportId ?? undefined)
+          : undefined,
+        ootd_report_summary: includeOotdContext
+          ? activeOotdReportSummary || undefined
+          : undefined,
       },
     };
+    const primaryAttachment = readyAttachments[0];
+    if (primaryAttachment?.media_id) {
+      ensureOotdReportForAttachment(primaryAttachment, {
+        imageUrl,
+        note: messageContent,
+      });
+    }
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     setLastSendStopped(false);
@@ -1374,6 +1566,27 @@ export function ChatView() {
     sendMutation.mutate({
       ...retryPayload,
       abortSignal: abortController.signal,
+    });
+  };
+
+  const visibleOotdReport =
+    activeOotdState?.status === "ready" ? activeOotdState.report : null;
+  const visibleOotdImageUrl =
+    activeOotdState?.imageUrl ||
+    (activeOotdState?.status === "ready"
+      ? activeOotdState.report.imageUrl
+      : "");
+
+  const saveOotdLongImage = async () => {
+    if (!visibleOotdReport) return;
+    let shareCard = ootdShareCard;
+    if (!shareCard) {
+      shareCard = await ootdShareCardMutation.mutateAsync(visibleOotdReport.id);
+    }
+    await downloadOotdLongImage({
+      report: visibleOotdReport,
+      imageUrl: visibleOotdImageUrl || visibleOotdReport.imageUrl,
+      shareCard,
     });
   };
 
@@ -1395,6 +1608,7 @@ export function ChatView() {
           <ChatMessagesPanel
             messageScrollRef={messageScrollRef}
             messages={messages}
+            composerExpanded={attachments.length > 0}
             showPendingIndicator={showPendingIndicator}
             showSendError={
               uploadAuthRequired || (sendMutation.isError && !lastSendStopped)
@@ -1405,6 +1619,8 @@ export function ChatView() {
                 : "generic"
             }
             onRetry={() => lastPayload && submit(lastPayload)}
+            onCreateOotdReport={openOotdReportForAttachment}
+            ootdReportStatusByMediaId={ootdStatusByMediaId}
           />
           {textComposerOpen && (
             <ChatComposer
@@ -1419,6 +1635,8 @@ export function ChatView() {
               onSubmit={() => submit()}
               onToggleMediaMenu={() => setMediaSheetOpen((open) => !open)}
               onRemoveAttachment={removeAttachment}
+              onCreateOotdReport={openOotdReportForAttachment}
+              ootdReportStatusByMediaId={ootdStatusByMediaId}
             />
           )}
         </>
@@ -1471,6 +1689,21 @@ export function ChatView() {
         onStopVoice={() => stopVoiceSession()}
         onOpenChat={() => setChatPanelOpen(true)}
         onCloseChat={() => setChatPanelOpen(false)}
+      />
+      <OotdReportModal
+        open={ootdReportOpen}
+        report={visibleOotdReport}
+        imageUrl={visibleOotdImageUrl}
+        shareCard={ootdShareCard}
+        pending={activeOotdState?.status === "generating"}
+        error={
+          activeOotdState?.status === "failed" ? activeOotdState.error : ""
+        }
+        sharePending={ootdShareCardMutation.isPending}
+        onClose={() => setOotdReportOpen(false)}
+        onSaveLongImage={() => {
+          void saveOotdLongImage();
+        }}
       />
     </AppChrome>
   );

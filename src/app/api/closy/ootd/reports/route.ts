@@ -5,6 +5,7 @@ import {
   getGoClawBaseUrl,
   resolveGoClawProxyAuth,
 } from "@/lib/api/go-claw-env";
+import { resolveProxyAcceptLanguage } from "@/lib/api/language";
 
 export const dynamic = "force-dynamic";
 
@@ -13,16 +14,14 @@ function getErrorMessage(error: unknown) {
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData();
-  const file = formData.get("file");
-
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Image file is required." }, { status: 400 });
-  }
-
+  const body = (await request.json()) as Record<string, unknown>;
   const baseUrl = getGoClawBaseUrl();
   const session = await getServerSession(authOptions);
   const auth = resolveGoClawProxyAuth(session);
+  const acceptLanguage = resolveProxyAcceptLanguage(
+    typeof body.note === "string" ? body.note : "",
+    request.headers.get("accept-language"),
+  );
 
   if (!auth) {
     return NextResponse.json(
@@ -31,25 +30,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const upstreamBody = new FormData();
-  upstreamBody.append("file", file, file.name);
-
   let upstreamResponse: Response;
   try {
-    upstreamResponse = await fetch(`${baseUrl}/v1/chat/attachments/upload`, {
+    upstreamResponse = await fetch(`${baseUrl}/v1/closy/ootd/reports`, {
       method: "POST",
       cache: "no-store",
       headers: {
         "X-GoClaw-User-Id": auth.userId,
         "X-GoClaw-Tenant-Id": auth.tenantId,
+        "Accept-Language": acceptLanguage,
+        "Content-Type": "application/json",
         Authorization: `Bearer ${auth.token}`,
       },
-      body: upstreamBody,
+      body: JSON.stringify({
+        ...body,
+        user_id: typeof body.user_id === "string" ? body.user_id : auth.userId,
+      }),
     });
   } catch (error) {
     return NextResponse.json(
       {
-        error: "Mochi could not upload that image yet.",
+        error: "Mochi could not create the OOTD report.",
         detail: getErrorMessage(error),
       },
       { status: 502 },
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
   if (!upstreamResponse.ok) {
     return NextResponse.json(
       {
-        error: "Mochi could not upload that image yet.",
+        error: "Mochi could not create the OOTD report.",
         status: upstreamResponse.status,
         detail: text,
       },
@@ -68,25 +69,5 @@ export async function POST(request: Request) {
     );
   }
 
-  let payload: Record<string, unknown> = {};
-  if (text.trim()) {
-    payload = JSON.parse(text) as Record<string, unknown>;
-  }
-
-  const mediaId = payload.media_id ?? payload.mediaId ?? payload.id;
-  if (typeof mediaId !== "string" || !mediaId) {
-    return NextResponse.json(
-      {
-        error: "Upload response did not include media_id.",
-      },
-      { status: 502 },
-    );
-  }
-
-  return NextResponse.json({
-    ...payload,
-    media_id: mediaId,
-    fileName: payload.fileName ?? file.name,
-    mimeType: payload.mimeType ?? file.type,
-  });
+  return NextResponse.json(text.trim() ? JSON.parse(text) : {});
 }

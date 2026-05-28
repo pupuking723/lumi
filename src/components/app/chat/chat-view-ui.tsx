@@ -21,33 +21,54 @@ import {
   Mic,
   MicOff,
   Plus,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GoogleAuthButton } from "@/components/auth/google-auth-button";
+import {
+  isPartialOotdReportContent,
+  parseOotdReportContent,
+} from "@/lib/ootd-report-content";
 import { cn } from "@/lib/utils";
 import type { LiveConnectionStatus } from "@/lib/live/ws-client";
-import type { ChatMessage } from "@/types/lumi";
+import type { ChatAttachment, ChatMessage } from "@/types/lumi";
 import type { PendingAttachment } from "./chat-types";
 
 export function ChatMessagesPanel({
   messageScrollRef,
   messages,
+  composerExpanded,
   showPendingIndicator,
   showSendError,
   sendErrorKind,
   onRetry,
+  onCreateOotdReport,
+  ootdReportStatusByMediaId,
 }: {
   messageScrollRef: RefObject<HTMLElement | null>;
   messages: ChatMessage[];
+  composerExpanded: boolean;
   showPendingIndicator: boolean;
   showSendError: boolean;
   sendErrorKind: "auth" | "generic";
   onRetry: () => void;
+  onCreateOotdReport: (attachment: ChatAttachment, imageUrl?: string) => void;
+  ootdReportStatusByMediaId?: Record<
+    string,
+    "generating" | "ready" | "failed"
+  >;
 }) {
   return (
-    <div className="fixed right-4 top-[6.5rem] bottom-[calc(4.65rem+env(safe-area-inset-bottom))] z-20 flex w-[66.666vw] max-w-[520px] flex-col overflow-hidden rounded-[24px] bg-transparent p-3 md:right-[max(1rem,calc((100vw-264px-760px)/2+1rem))]">
+    <div
+      className={cn(
+        "fixed right-4 top-[6.5rem] z-20 flex w-[66.666vw] max-w-[520px] flex-col overflow-hidden rounded-[24px] bg-transparent p-3 transition-[bottom] duration-200 md:right-[max(1rem,calc((100vw-264px-760px)/2+1rem))]",
+        composerExpanded
+          ? "bottom-[calc(8.4rem+env(safe-area-inset-bottom))]"
+          : "bottom-[calc(4.65rem+env(safe-area-inset-bottom))]",
+      )}
+    >
       <div className="relative flex min-h-0 flex-1 flex-col">
         <section
           ref={messageScrollRef}
@@ -56,7 +77,12 @@ export function ChatMessagesPanel({
           <div className="flex min-h-full flex-col justify-end gap-3">
             {messages.length === 0 && <WelcomeMessage />}
             {messages.map((message) => (
-              <MessageItem key={message.id} message={message} />
+              <MessageItem
+                key={message.id}
+                message={message}
+                onCreateOotdReport={onCreateOotdReport}
+                ootdReportStatusByMediaId={ootdReportStatusByMediaId}
+              />
             ))}
             {showPendingIndicator && (
               <div className="lumi-fade-in max-w-full px-1 py-2 text-[#343145]">
@@ -98,6 +124,8 @@ export function ChatComposer({
   onSubmit,
   onToggleMediaMenu,
   onRemoveAttachment,
+  onCreateOotdReport,
+  ootdReportStatusByMediaId,
 }: {
   composerBodyRef: RefObject<HTMLDivElement | null>;
   draftInputRef: RefObject<HTMLTextAreaElement | null>;
@@ -110,6 +138,11 @@ export function ChatComposer({
   onSubmit: () => void;
   onToggleMediaMenu: () => void;
   onRemoveAttachment: (localId: string) => void;
+  onCreateOotdReport: (attachment: PendingAttachment) => void;
+  ootdReportStatusByMediaId?: Record<
+    string,
+    "generating" | "ready" | "failed"
+  >;
 }) {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -136,17 +169,23 @@ export function ChatComposer({
       <form
         onSubmit={handleSubmit}
         className={cn(
-          "w-full rounded-[24px] border border-white/82 bg-[#fbfafc]/76 backdrop-blur-2xl",
-          attachments.length > 0 ? "p-2" : "h-11 overflow-hidden p-0",
+          "w-full rounded-[24px] border border-white/82 bg-[#fbfafc]/90 shadow-[0_1px_0_rgba(255,255,255,0.92)_inset,0_16px_36px_rgba(46,43,60,0.12)] backdrop-blur-2xl",
+          attachments.length > 0 ? "p-1.5" : "h-11 overflow-hidden p-0",
         )}
       >
         {attachments.length > 0 && (
-          <div className="mb-2 space-y-2">
+          <div className="mb-1.5 space-y-1.5">
             {attachments.map((attachment) => (
               <AttachmentPreview
                 key={attachment.localId}
                 attachment={attachment}
                 onRemove={() => onRemoveAttachment(attachment.localId)}
+                onCreateOotdReport={() => onCreateOotdReport(attachment)}
+                ootdStatus={
+                  attachment.media_id
+                    ? ootdReportStatusByMediaId?.[attachment.media_id]
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -187,15 +226,23 @@ export function ChatComposer({
 function AttachmentPreview({
   attachment,
   onRemove,
+  onCreateOotdReport,
+  ootdStatus,
 }: {
   attachment: PendingAttachment;
   onRemove: () => void;
+  onCreateOotdReport: () => void;
+  ootdStatus?: "generating" | "ready" | "failed";
 }) {
+  const canCreateReport =
+    attachment.uploadStatus === "ready" && attachment.media_id;
+  const ootdPending = ootdStatus === "generating";
+
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[22px] border border-white/72 bg-[#edeaf1]/72 px-2 py-2 text-xs font-extrabold text-[#5f586f]">
-      <span className="flex min-w-0 items-center gap-2">
+    <div className="flex h-14 items-center justify-between gap-2 rounded-[20px] border border-white/76 bg-[#f1eef4]/90 px-2 text-xs font-extrabold text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]">
+      <span className="flex min-w-0 flex-1 items-center gap-2">
         {attachment.previewUrl && (
-          <span className="relative size-10 shrink-0 overflow-hidden rounded-[14px] bg-white/50">
+          <span className="relative size-11 shrink-0 overflow-hidden rounded-[15px] bg-white/60">
             <Image
               src={attachment.previewUrl}
               alt=""
@@ -206,13 +253,13 @@ function AttachmentPreview({
             />
           </span>
         )}
-        <span className="min-w-0">
-          <span className="block truncate">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[0.78rem] leading-4 text-[#4a4559]">
             {attachment.fileName ?? "Outfit image"}
           </span>
           <span
             className={cn(
-              "block text-[0.68rem]",
+              "block truncate text-[0.68rem] leading-4",
               attachment.uploadStatus === "failed"
                 ? "text-[#9c4a61]"
                 : "text-[#8c7897]",
@@ -226,9 +273,32 @@ function AttachmentPreview({
           </span>
         </span>
       </span>
-      <button type="button" onClick={onRemove}>
-        remove
-      </button>
+      <span className="flex shrink-0 items-center gap-1">
+        {canCreateReport && (
+          <button
+            type="button"
+            aria-label="OOTD report"
+            onClick={onCreateOotdReport}
+            className="inline-flex h-8 items-center gap-1 rounded-full bg-white px-2.5 text-[0.72rem] font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.92)_inset] transition hover:bg-[#fbfafc]"
+          >
+            {ootdPending ? (
+              <LoaderCircle size={12} className="animate-spin" aria-hidden />
+            ) : (
+              <Sparkles size={12} aria-hidden />
+            )}
+            OOTD
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label="remove"
+          onClick={onRemove}
+          className="inline-flex size-8 items-center justify-center rounded-full text-[#6f6880] transition hover:bg-white/72 hover:text-[#302d43]"
+        >
+          <X size={13} strokeWidth={3} aria-hidden />
+          <span className="sr-only">remove</span>
+        </button>
+      </span>
     </div>
   );
 }
@@ -536,12 +606,32 @@ function WelcomeMessage() {
   );
 }
 
-function MessageItem({ message }: { message: ChatMessage }) {
+function MessageItem({
+  message,
+  onCreateOotdReport,
+  ootdReportStatusByMediaId,
+}: {
+  message: ChatMessage;
+  onCreateOotdReport: (attachment: ChatAttachment, imageUrl?: string) => void;
+  ootdReportStatusByMediaId?: Record<
+    string,
+    "generating" | "ready" | "failed"
+  >;
+}) {
   const isUser = message.role === "user";
   const hasContent = message.content.trim().length > 0;
+  const ootdAttachment = message.attachments?.find(
+    (attachment) => attachment.media_id,
+  );
 
   if (!isUser) {
     if (!hasContent) return null;
+    if (
+      parseOotdReportContent(message.content) ||
+      isPartialOotdReportContent(message.content)
+    ) {
+      return null;
+    }
 
     return (
       <AgentBubble>
@@ -561,11 +651,36 @@ function MessageItem({ message }: { message: ChatMessage }) {
         )}
       >
         {message.imageUrl && (
-          <ChatMessageImage
-            src={message.imageUrl}
-            alt="Uploaded outfit preview"
-            className="mb-2"
-          />
+          <div className="mb-2 space-y-2">
+            <ChatMessageImage
+              src={message.imageUrl}
+              alt="Uploaded outfit preview"
+            />
+            {ootdAttachment && (
+              (() => {
+                const ootdStatus =
+                  ootdReportStatusByMediaId?.[ootdAttachment.media_id];
+                const ootdPending = ootdStatus === "generating";
+                return (
+              <button
+                type="button"
+                aria-label="OOTD report"
+                onClick={() =>
+                  onCreateOotdReport(ootdAttachment, message.imageUrl)
+                }
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-white px-2.5 text-[0.72rem] font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset] transition hover:bg-[#f5f3f7]"
+              >
+                {ootdPending ? (
+                  <LoaderCircle size={12} className="animate-spin" aria-hidden />
+                ) : (
+                  <Sparkles size={12} aria-hidden />
+                )}
+                OOTD
+              </button>
+                );
+              })()
+            )}
+          </div>
         )}
         {message.content}
         {message.status === "failed" && (

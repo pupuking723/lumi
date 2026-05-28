@@ -1,6 +1,7 @@
 import type {
   AnalyzeVisionInput,
   CreateLookInput,
+  CreateOotdReportInput,
   LumiApiClient,
   SubmitOotdReviewInput,
 } from "./client";
@@ -72,6 +73,16 @@ export function createHttpClient(baseUrl: string): LumiApiClient {
       request(root, "/v1/closy/ootd/reviews", {
         method: "POST",
         body: JSON.stringify(input),
+      }),
+    createOotdReport: (input: CreateOotdReportInput) =>
+      request(root, "/v1/closy/ootd/reports", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    createOotdShareCard: (reportId) =>
+      request(root, `/v1/closy/ootd/reports/${reportId}/share-card`, {
+        method: "POST",
+        body: JSON.stringify({}),
       }),
     listLooks: () => request(root, "/looks"),
     createLook: (input: CreateLookInput) =>
