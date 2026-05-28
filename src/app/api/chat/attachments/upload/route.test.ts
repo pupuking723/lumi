@@ -61,6 +61,8 @@ describe("chat attachment upload route", () => {
         method: "POST",
         cache: "no-store",
         headers: {
+          "X-GoClaw-User-Id": "google:user-test",
+          "X-GoClaw-Tenant-Id": "default",
           Authorization: "Bearer goclaw-session-token",
         },
       }),

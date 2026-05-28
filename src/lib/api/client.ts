@@ -3,6 +3,8 @@ import type {
   LookCard,
   MochiConversation,
   OotdReview,
+  OotdReport,
+  OotdShareCard,
   SendMessageInput,
   SendMessageResult,
   UploadedAttachment,
@@ -34,6 +36,14 @@ export interface SubmitOotdReviewInput {
   note?: string;
 }
 
+export interface CreateOotdReportInput {
+  media_id: string;
+  session_id?: string;
+  scene?: "daily" | "work" | "school" | "date" | "party" | "travel";
+  note?: string;
+  user_id?: string;
+}
+
 export interface LumiApiClient {
   getMe: () => Promise<UserProfile>;
   updateStyleProfile: (
@@ -52,6 +62,8 @@ export interface LumiApiClient {
   ) => Promise<SendMessageResult>;
   analyzeVision: (input: AnalyzeVisionInput) => Promise<VisionAnalysis>;
   submitOotdReview: (input: SubmitOotdReviewInput) => Promise<OotdReview>;
+  createOotdReport: (input: CreateOotdReportInput) => Promise<OotdReport>;
+  createOotdShareCard: (reportId: string) => Promise<OotdShareCard>;
   listLooks: () => Promise<LookCard[]>;
   createLook: (input: CreateLookInput) => Promise<LookCard>;
   createShareLink: (lookId: string) => Promise<ShareLink>;
@@ -62,6 +74,7 @@ export function createLumiApiClient(): LumiApiClient {
   const chatProxyPath = process.env.NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH;
   const messagesProxyPath = process.env.NEXT_PUBLIC_LUMI_MESSAGES_PROXY_PATH;
   const uploadProxyPath = process.env.NEXT_PUBLIC_LUMI_UPLOAD_PROXY_PATH;
+  const ootdReportProxyPath = process.env.NEXT_PUBLIC_LUMI_OOTD_REPORT_PROXY_PATH;
   return baseUrl
     ? createHttpClient(baseUrl)
     : createMockClient({
@@ -77,6 +90,10 @@ export function createLumiApiClient(): LumiApiClient {
           uploadProxyPath === "off"
             ? undefined
             : (uploadProxyPath ?? "/api/chat/attachments/upload"),
+        ootdReportProxyPath:
+          ootdReportProxyPath === "off"
+            ? undefined
+            : (ootdReportProxyPath ?? "/api/closy/ootd/reports"),
       });
 }
 

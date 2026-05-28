@@ -57,9 +57,15 @@ export function GoogleOneTap() {
   const { status, update } = useSession();
   const initializedRef = useRef(false);
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+  const oneTapEnabled = process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_ENABLED === "true";
 
   useEffect(() => {
-    if (!clientId || status !== "unauthenticated" || initializedRef.current) {
+    if (
+      !oneTapEnabled ||
+      !clientId ||
+      status !== "unauthenticated" ||
+      initializedRef.current
+    ) {
       return;
     }
 
@@ -93,7 +99,7 @@ export function GoogleOneTap() {
     return () => {
       cancelled = true;
     };
-  }, [clientId, status, update]);
+  }, [clientId, oneTapEnabled, status, update]);
 
   return null;
 }

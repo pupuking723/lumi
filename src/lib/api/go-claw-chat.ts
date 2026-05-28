@@ -4,6 +4,10 @@ import type {
   SendMessageInput,
   SendMessageResult,
 } from "@/types/lumi";
+import {
+  isPartialOotdReportContent,
+  parseOotdReportContent,
+} from "@/lib/ootd-report-content";
 
 export interface GoClawChatMessage {
   role: "user" | "assistant" | "system";
@@ -12,6 +16,9 @@ export interface GoClawChatMessage {
 
 export interface GoClawChatCompletion {
   id?: string;
+  error?: {
+    message?: string;
+  };
   choices?: Array<{
     index?: number;
     message?: {
@@ -61,6 +68,12 @@ export class ChatProxyError extends Error {
 }
 
 const now = () => new Date().toISOString();
+export const OOTD_REPORT_CHAT_ERROR =
+  "Mochi returned a report instead of a chat reply. Please retry.";
+
+export function isOotdReportChatError(error: unknown) {
+  return error instanceof Error && error.message === OOTD_REPORT_CHAT_ERROR;
+}
 
 function makeMessageId(prefix: string, seed?: string) {
   const generated =
@@ -74,7 +87,12 @@ export function toGoClawMessages(
   input: SendMessageInput,
 ): GoClawChatMessage[] {
   const previousMessages = history
-    .filter((message) => message.kind === "text" && message.content.trim())
+    .filter(
+      (message) =>
+        message.kind === "text" &&
+        message.content.trim() &&
+        !isOotdReportLikeContent(message.content),
+    )
     .map<GoClawChatMessage>((message) => ({
       role:
         message.role === "user"
@@ -210,6 +228,26 @@ function getSseDataLines(rawEvent: string) {
     .filter(Boolean);
 }
 
+function isTechnicalProviderError(content: string) {
+  return (
+    /^Error:\s+iter\s+\d+\s+think:\s+llm call:/i.test(content.trim()) ||
+    (content.includes("streamGenerateContent") &&
+      content.toLowerCase().includes("unexpected eof"))
+  );
+}
+
+function isOotdReportLikeContent(content: string) {
+  return Boolean(
+    parseOotdReportContent(content) || isPartialOotdReportContent(content),
+  );
+}
+
+function assertChatAssistantContent(content: string) {
+  if (isOotdReportLikeContent(content)) {
+    throw new Error(OOTD_REPORT_CHAT_ERROR);
+  }
+}
+
 export async function collectGoClawEventStream(
   stream: ReadableStream<Uint8Array>,
   onAssistantDelta?: (delta: string) => void,
@@ -243,9 +281,17 @@ export async function collectGoClawEventStream(
         throw new Error("GoClaw stream included invalid JSON data.");
       }
 
+      if (payload.error?.message) {
+        throw new Error(payload.error.message);
+      }
+
       upstreamId ??= payload.id;
       const delta = extractGoClawStreamDelta(payload);
       if (!delta) continue;
+      if (isTechnicalProviderError(`${content}${delta}`)) {
+        throw new Error("Mochi lost the model connection. Please retry.");
+      }
+      assertChatAssistantContent(`${content}${delta}`);
 
       content += delta;
       onAssistantDelta?.(delta);
@@ -296,6 +342,7 @@ function makeChatResult(
   upstreamId?: string,
 ): SendMessageResult {
   const createdAt = now();
+  assertChatAssistantContent(assistantContent);
 
   return {
     userMessage: {
@@ -382,7 +429,9 @@ export async function sendMessageThroughChatProxy(
     );
   }
 
-  return response.json() as Promise<SendMessageResult>;
+  const result = (await response.json()) as SendMessageResult;
+  assertChatAssistantContent(result.assistantMessage.content);
+  return result;
 }
 
 export async function fetchMessagesThroughChatProxy(

@@ -57,6 +57,8 @@ export interface ChatInputContext {
   mode: "text" | "image" | "voice" | "multimodal";
   voice_transcript?: string;
   refers_to_media_id?: string;
+  refers_to_ootd_report_id?: string;
+  ootd_report_summary?: string;
 }
 
 export interface ChatAttachment {
@@ -115,6 +117,46 @@ export interface OotdReview {
   main_issue: string;
   suggestion: string;
   mochi_line: string;
+  createdAt: string;
+}
+
+export interface OotdReport {
+  id: string;
+  mediaId: string;
+  imageUrl: string;
+  status: "completed" | "failed";
+  todayJudgment: {
+    title: string;
+    score: number;
+    label: string;
+    summary: string;
+  };
+  overallStyle: string;
+  highlights: string[];
+  biggestIssue: string;
+  suggestions: Array<{
+    title: string;
+    body: string;
+  }>;
+  palette: Array<{
+    name: string;
+    hex: string;
+  }>;
+  mochiLine: string;
+  shareCard: {
+    title: string;
+    quote: string;
+    advice: string[];
+    cta: string;
+  };
+  createdAt: string;
+}
+
+export interface OotdShareCard {
+  id: string;
+  reportId: string;
+  shortUrl: string;
+  qrImageUrl: string;
   createdAt: string;
 }
 

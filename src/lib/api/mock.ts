@@ -3,7 +3,9 @@ import type {
   ChatMessage,
   LookCard,
   MochiConversation,
+  OotdReport,
   OotdReview,
+  OotdShareCard,
   ShareLink,
   UserProfile,
   VisionAnalysis,
@@ -15,6 +17,7 @@ import {
 import type {
   AnalyzeVisionInput,
   CreateLookInput,
+  CreateOotdReportInput,
   LumiApiClient,
 } from "./client";
 
@@ -68,6 +71,7 @@ interface MockClientOptions {
   chatProxyPath?: string;
   messagesProxyPath?: string;
   uploadProxyPath?: string;
+  ootdReportProxyPath?: string;
 }
 
 function mochiReply(content: string): string {
@@ -124,6 +128,66 @@ function buildOotdReview(input: {
       input.note?.trim() ||
       "Add a sharper bag, glasses, or shoe shape to give the outfit a final point.",
     mochi_line: "Good mood. Great base. Give it one tiny wink of structure.",
+    createdAt: now(),
+  };
+}
+
+function buildOotdReport(input: CreateOotdReportInput): OotdReport {
+  return {
+    id: id("ootd-report"),
+    mediaId: input.media_id,
+    imageUrl: "",
+    status: "completed",
+    todayJudgment: {
+      title: "City Casual Minimalism",
+      score: 5.5,
+      label: "Almost there",
+      summary:
+        "The palette is calm and wearable, but the upper half needs one clearer point of view.",
+    },
+    overallStyle:
+      "Relaxed city casual built on neutrals, soft volume, and a low-key street base.",
+    highlights: [
+      "The black and bone colors already read intentional.",
+      "Wide-leg trousers give the look an easy off-duty shape.",
+    ],
+    biggestIssue:
+      "The black top sits as one heavy block, so the outfit loses a little personality before it reaches the accessories.",
+    suggestions: [
+      {
+        title: "Add a sharper anchor",
+        body: "Use a structured black bag, a clean belt, or a metal detail to make the relaxed base feel chosen.",
+      },
+      {
+        title: "Lift the shoe story",
+        body: "A lighter sneaker or a chunkier sole would connect the trousers to the rest of the outfit faster.",
+      },
+    ],
+    palette: [
+      { name: "Black", hex: "#1A1A1A" },
+      { name: "Bone", hex: "#B8A99A" },
+      { name: "Mist", hex: "#EAE9E1" },
+    ],
+    mochiLine: "The base is fine; it just needs one accessory with a backbone.",
+    shareCard: {
+      title: "City Casual Minimalism",
+      quote: "The base is fine; it just needs one accessory with a backbone.",
+      advice: ["Add one structured black detail.", "Let the shoes do more work."],
+      cta: "Ask Mochi before you leave",
+    },
+    createdAt: now(),
+  };
+}
+
+function buildOotdShareCard(reportId: string): OotdShareCard {
+  const shortUrl = `https://lumi.style/ootd/${reportId}`;
+  const qrSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"><rect width="160" height="160" fill="#fff"/><path fill="#302d43" d="M16 16h42v42H16zM102 16h42v42h-42zM16 102h42v42H16zM72 72h14v14H72zM94 72h14v14H94zM116 72h14v14h-14zM72 94h14v14H72zM102 102h14v14h-14zM130 102h14v14h-14zM72 124h14v20H72zM94 130h14v14H94zM122 130h22v14h-22z"/></svg>';
+  return {
+    id: id("share"),
+    reportId,
+    shortUrl,
+    qrImageUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrSvg)}`,
     createdAt: now(),
   };
 }
@@ -265,6 +329,51 @@ export function createMockClient(
     async submitOotdReview(input) {
       await delay(900);
       return buildOotdReview(input);
+    },
+    async createOotdReport(input) {
+      if (options.ootdReportProxyPath) {
+        const response = await fetch(options.ootdReportProxyPath, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            errorText || `OOTD report failed with ${response.status}`,
+          );
+        }
+
+        return response.json();
+      }
+
+      await delay(1100);
+      return buildOotdReport(input);
+    },
+    async createOotdShareCard(reportId) {
+      if (options.ootdReportProxyPath) {
+        const response = await fetch(
+          `${options.ootdReportProxyPath}/${reportId}/share-card`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          },
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            errorText || `OOTD share card failed with ${response.status}`,
+          );
+        }
+
+        return response.json();
+      }
+
+      await delay(420);
+      return buildOotdShareCard(reportId);
     },
     async listLooks() {
       await delay(220);

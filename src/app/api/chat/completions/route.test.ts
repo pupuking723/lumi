@@ -80,6 +80,8 @@ describe("chat completions route", () => {
           Authorization: "Bearer goclaw-session-token",
           "Accept-Language": "en",
           Accept: "text/event-stream",
+          "X-GoClaw-User-Id": "google:user-test",
+          "X-GoClaw-Tenant-Id": "default",
         }),
       }),
     );
@@ -110,6 +112,43 @@ describe("chat completions route", () => {
       { role: "assistant", content: "Old advice" },
       { role: "user", content: "Review this" },
     ]);
+  });
+
+  it("uses the user message language ahead of the environment fallback", async () => {
+    vi.stubEnv("LUMI_AGENT_ACCEPT_LANGUAGE", "zh");
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(upstream, {
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(
+      new Request("https://lumi.test/api/chat/completions", {
+        method: "POST",
+        headers: { "accept-language": "zh-CN,zh;q=0.9" },
+        body: JSON.stringify({
+          conversationId: "conv-1",
+          message: {
+            content: "Can you review this look?",
+            attachments: [{ media_id: "media-1", source: "chat", role: "user" }],
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock.mock.calls[0][1].headers).toEqual(
+      expect.objectContaining({
+        "Accept-Language": "en",
+      }),
+    );
   });
 
   it("returns 401 without a GoClaw session token", async () => {
