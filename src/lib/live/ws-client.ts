@@ -23,7 +23,7 @@ export interface LiveServerEvent {
   done?: boolean;
 }
 
-export function getLiveWebSocketUrl(sessionId: string) {
+export function getLiveWebSocketUrl(sessionId: string, resumeHandle?: string | null) {
   const endpoint =
     process.env.NEXT_PUBLIC_LUMI_LIVE_WS_URL ?? defaultLiveWebSocketEndpoint();
 
@@ -42,6 +42,9 @@ export function getLiveWebSocketUrl(sessionId: string) {
   }
 
   url.searchParams.set("session_id", sessionId);
+  if (resumeHandle) {
+    url.searchParams.set("resume_handle", resumeHandle);
+  }
   return url.toString();
 }
 
