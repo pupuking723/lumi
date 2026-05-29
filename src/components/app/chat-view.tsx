@@ -66,6 +66,7 @@ const LIVE_END_OF_SPEECH_MS = 500;
 const LIVE_CALIBRATION_FRAMES = 16;
 const LIVE_CONNECT_TIMEOUT_MS = 12000;
 const LIVE_PREWARM_DELAY_MS = 1500;
+const LIVE_LISTENING_READY_DELAY_MS = 2000;
 const LIVE_STANDBY_IDLE_MS = 90000;
 const DEFAULT_IMAGE_REVIEW_PROMPT = "Can you review this look?";
 
@@ -172,6 +173,7 @@ export function ChatView() {
   const liveExpectedCloseRef = useRef(false);
   const liveInputPausedRef = useRef(false);
   const liveResumeTimerRef = useRef<number | null>(null);
+  const liveListeningReadyTimerRef = useRef<number | null>(null);
   const liveConnectTimeoutRef = useRef<number | null>(null);
   const liveSocketConnectPromiseRef = useRef<Promise<void> | null>(null);
   const liveStandbyIdleTimerRef = useRef<number | null>(null);
@@ -578,6 +580,10 @@ export function ChatView() {
       liveSocketConnectPromiseRef.current = null;
       clearLiveResumeTimer();
       clearLiveStandbyIdleTimer();
+      if (liveListeningReadyTimerRef.current !== null) {
+        window.clearTimeout(liveListeningReadyTimerRef.current);
+        liveListeningReadyTimerRef.current = null;
+      }
       liveSessionGenerationRef.current += 1;
       liveCaptureGenerationRef.current += 1;
       if (liveReconnectTimerRef.current !== null) {
@@ -887,7 +893,21 @@ export function ChatView() {
         voiceFrameRef.current = window.requestAnimationFrame(updateLevels);
       };
       updateLevels();
-      setVoiceStatus("listening");
+      if (liveListeningReadyTimerRef.current !== null) {
+        window.clearTimeout(liveListeningReadyTimerRef.current);
+      }
+      liveListeningReadyTimerRef.current = window.setTimeout(() => {
+        liveListeningReadyTimerRef.current = null;
+        if (
+          liveSessionGenerationRef.current !== generation ||
+          !analyserRef.current
+        ) {
+          return;
+        }
+        setVoiceStatus((current) =>
+          current === "connecting" ? "listening" : current,
+        );
+      }, LIVE_LISTENING_READY_DELAY_MS);
     },
     [],
   );
