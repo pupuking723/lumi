@@ -65,6 +65,8 @@ const LIVE_PRE_SPEECH_FRAME_LIMIT = 4;
 const LIVE_END_OF_SPEECH_MS = 500;
 const LIVE_CALIBRATION_FRAMES = 16;
 const LIVE_CONNECT_TIMEOUT_MS = 12000;
+const LIVE_PREWARM_DELAY_MS = 1500;
+const LIVE_STANDBY_IDLE_MS = 90000;
 const DEFAULT_IMAGE_REVIEW_PROMPT = "Can you review this look?";
 
 type OotdReportState =
@@ -170,12 +172,17 @@ export function ChatView() {
   const liveInputPausedRef = useRef(false);
   const liveResumeTimerRef = useRef<number | null>(null);
   const liveConnectTimeoutRef = useRef<number | null>(null);
+  const liveSocketConnectPromiseRef = useRef<Promise<void> | null>(null);
+  const liveStandbyIdleTimerRef = useRef<number | null>(null);
   const liveReconnectAttemptRef = useRef(0);
   const liveReconnectTimerRef = useRef<number | null>(null);
   const liveSessionGenerationRef = useRef(0);
   const liveCaptureGenerationRef = useRef(0);
+  const liveSocketReadyRef = useRef(false);
+  const liveCaptureRequestedRef = useRef(false);
   const liveSentMediaIdsRef = useRef<Set<string>>(new Set());
   const livePendingMediaAttachmentsRef = useRef<PendingAttachment[]>([]);
+  const attachmentsRef = useRef<PendingAttachment[]>([]);
   const liveAssistantMessageIdRef = useRef<string | null>(null);
   const liveUserMessageIdRef = useRef<string | null>(null);
   const liveLastUserTranscriptRef = useRef("");
@@ -465,6 +472,13 @@ export function ChatView() {
     }
   }, []);
 
+  const clearLiveStandbyIdleTimer = useCallback(() => {
+    if (liveStandbyIdleTimerRef.current !== null) {
+      window.clearTimeout(liveStandbyIdleTimerRef.current);
+      liveStandbyIdleTimerRef.current = null;
+    }
+  }, []);
+
   const pauseLiveInput = useCallback(() => {
     clearLiveResumeTimer();
     liveInputPausedRef.current = true;
@@ -552,7 +566,11 @@ export function ChatView() {
       liveManualStopRef.current = true;
       liveExpectedCloseRef.current = true;
       liveInputPausedRef.current = false;
+      liveSocketReadyRef.current = false;
+      liveCaptureRequestedRef.current = false;
+      liveSocketConnectPromiseRef.current = null;
       clearLiveResumeTimer();
+      clearLiveStandbyIdleTimer();
       liveSessionGenerationRef.current += 1;
       liveCaptureGenerationRef.current += 1;
       if (liveReconnectTimerRef.current !== null) {
@@ -564,11 +582,12 @@ export function ChatView() {
         liveConnectTimeoutRef.current = null;
       }
 
-      if (liveSocketRef.current?.readyState === WebSocket.OPEN) {
-        liveSocketRef.current.send(JSON.stringify({ type: "audio_end" }));
-        liveSocketRef.current.send(JSON.stringify({ type: "close" }));
+      const liveSocket = liveSocketRef.current;
+      if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
+        liveSocket.send(JSON.stringify({ type: "audio_end" }));
+        liveSocket.send(JSON.stringify({ type: "close" }));
       }
-      liveSocketRef.current?.close();
+      liveSocket?.close();
       liveSocketRef.current = null;
 
       if (audioProcessorRef.current) {
@@ -610,7 +629,12 @@ export function ChatView() {
         setVoiceLevels(DEFAULT_VOICE_LEVELS);
       }
     },
-    [clearLiveAssistantDraft, clearLiveResumeTimer, stopLivePlayback],
+    [
+      clearLiveAssistantDraft,
+      clearLiveResumeTimer,
+      clearLiveStandbyIdleTimer,
+      stopLivePlayback,
+    ],
   );
 
   const sendLiveMediaAttachment = useCallback(
@@ -861,12 +885,339 @@ export function ChatView() {
     [],
   );
 
-  const startVoiceSession = useCallback(
-    async (resetReconnect = true) => {
+  const startLiveCaptureForSocket = useCallback(
+    (socket: WebSocket, generation: number) => {
+      liveCaptureRequestedRef.current = true;
+      clearLiveStandbyIdleTimer();
+      if (
+        socket !== liveSocketRef.current ||
+        socket.readyState !== WebSocket.OPEN ||
+        liveSessionGenerationRef.current !== generation ||
+        !liveSocketReadyRef.current
+      ) {
+        return;
+      }
+      void startLiveCapture(socket, generation).then(() => {
+        attachmentsRef.current.forEach(sendOrQueueLiveMediaAttachment);
+        flushQueuedLiveMediaAttachments();
+      });
+    },
+    [
+      clearLiveStandbyIdleTimer,
+      flushQueuedLiveMediaAttachments,
+      sendOrQueueLiveMediaAttachment,
+      startLiveCapture,
+    ],
+  );
+
+  const scheduleLiveStandbyClose = useCallback(
+    (socket: WebSocket, generation: number) => {
+      clearLiveStandbyIdleTimer();
+      if (liveCaptureRequestedRef.current) return;
+      liveStandbyIdleTimerRef.current = window.setTimeout(() => {
+        liveStandbyIdleTimerRef.current = null;
+        if (
+          socket !== liveSocketRef.current ||
+          liveSessionGenerationRef.current !== generation ||
+          liveCaptureRequestedRef.current
+        ) {
+          return;
+        }
+        liveExpectedCloseRef.current = true;
+        socket.send(JSON.stringify({ type: "close" }));
+        socket.close();
+      }, LIVE_STANDBY_IDLE_MS);
+    },
+    [clearLiveStandbyIdleTimer],
+  );
+
+  const connectLiveSocket = useCallback(
+    async (captureRequested: boolean) => {
+      if (captureRequested) {
+        clearLiveStandbyIdleTimer();
+      }
+      if (liveSocketConnectPromiseRef.current) {
+        if (captureRequested) {
+          liveCaptureRequestedRef.current = true;
+        }
+        await liveSocketConnectPromiseRef.current;
+        return;
+      }
+      const connectBaseGeneration = liveSessionGenerationRef.current;
+      const connectPromise = prepareLiveWebSocketSession();
+      liveSocketConnectPromiseRef.current = connectPromise;
+      try {
+        await connectPromise;
+      } finally {
+        if (liveSocketConnectPromiseRef.current === connectPromise) {
+          liveSocketConnectPromiseRef.current = null;
+        }
+      }
+      if (liveSessionGenerationRef.current !== connectBaseGeneration) {
+        return;
+      }
       liveManualStopRef.current = false;
       liveExpectedCloseRef.current = false;
       liveInputPausedRef.current = false;
+      liveCaptureRequestedRef.current = captureRequested;
+      liveSocketReadyRef.current = false;
+
+      const generation = ++liveSessionGenerationRef.current;
+      const liveSessionId = sessionId || getOrCreateMochiSessionId();
+      const socket = new WebSocket(getLiveWebSocketUrl(liveSessionId));
+      liveSocketRef.current = socket;
+      let socketOpened = false;
+
+      const clearConnectTimeout = () => {
+        if (liveConnectTimeoutRef.current !== null) {
+          window.clearTimeout(liveConnectTimeoutRef.current);
+          liveConnectTimeoutRef.current = null;
+        }
+      };
+
+      liveConnectTimeoutRef.current = window.setTimeout(() => {
+        if (
+          liveSessionGenerationRef.current !== generation ||
+          socket.readyState !== WebSocket.CONNECTING
+        ) {
+          return;
+        }
+        liveExpectedCloseRef.current = true;
+        if (liveCaptureRequestedRef.current) {
+          setVoiceError(
+            "Live voice connection timed out. Check the websocket URL and gateway.",
+          );
+          setVoiceStatus("error");
+        }
+        socket.close();
+      }, LIVE_CONNECT_TIMEOUT_MS);
+
+      socket.addEventListener("open", () => {
+        clearConnectTimeout();
+        socketOpened = true;
+        if (liveSessionGenerationRef.current !== generation) {
+          socket.close();
+          return;
+        }
+        socket.send(
+          JSON.stringify({
+            type: "start",
+            session_id: liveSessionId,
+            source: "chat",
+            mode: "voice",
+          }),
+        );
+      });
+
+      socket.addEventListener("message", (event) => {
+        const parsed = parseLiveEvent(event.data);
+        if (!parsed) return;
+
+        const eventType = parsed.type ?? parsed.event;
+        if (eventType === "ready" || eventType === "live_ready") {
+          return;
+        }
+        if (eventType === "live_setup_complete") {
+          liveSocketReadyRef.current = true;
+          if (liveCaptureRequestedRef.current) {
+            startLiveCaptureForSocket(socket, generation);
+          } else {
+            scheduleLiveStandbyClose(socket, generation);
+          }
+          return;
+        }
+        if (eventType === "media_received") {
+          return;
+        }
+
+        if (eventType === "error") {
+          if (liveCaptureRequestedRef.current) {
+            setVoiceError(
+              parsed.message ?? parsed.error ?? "Live voice connection failed.",
+            );
+            setVoiceStatus("error");
+          }
+          return;
+        }
+
+        if (eventType === "done" || parsed.done) {
+          void resumeLiveInputAfterPlayback();
+          return;
+        }
+        if (eventType === "live_response_start") {
+          pauseLiveInput();
+          return;
+        }
+        if (eventType === "live_response_end") {
+          void resumeLiveInputAfterPlayback();
+          return;
+        }
+        if (eventType === "live_interrupted") {
+          liveInputPausedRef.current = false;
+          clearLiveResumeTimer();
+          clearLiveAssistantDraft();
+          stopLivePlayback();
+          setVoiceStatus("listening");
+          return;
+        }
+
+        const audio =
+          parsed.audio ??
+          (eventType === "audio" || eventType === "live_audio"
+            ? parsed.data
+            : undefined);
+        if (audio) {
+          pauseLiveInput();
+          void playLiveAudio(audio);
+          return;
+        }
+
+        const text =
+          parsed.content ?? parsed.text ?? parsed.message ?? parsed.transcript;
+        if (text) {
+          if (eventType === "live_transcript" && parsed.role === "user") {
+            if (!liveInputPausedRef.current) setVoiceStatus("speaking");
+            upsertLiveUserTranscript(text);
+            return;
+          }
+          if (
+            eventType === "live_transcript" &&
+            parsed.role === "assistant"
+          ) {
+            pauseLiveInput();
+            finishLiveUserTranscript();
+            appendLiveAssistantDelta(text);
+            return;
+          }
+          if (eventType === "message") {
+            if (parsed.role === "assistant") {
+              pauseLiveInput();
+              finishLiveUserTranscript();
+              finalizeLiveAssistantMessage(text);
+              void resumeLiveInputAfterPlayback();
+            } else {
+              if (parsed.role === "user") {
+                const alreadyShown =
+                  liveLastUserTranscriptRef.current.trim() &&
+                  textsOverlap(liveLastUserTranscriptRef.current, text);
+                if (!alreadyShown) {
+                  upsertLiveUserTranscript(text, "sent");
+                }
+                finishLiveUserTranscript();
+              } else {
+                appendLiveMessage(text);
+              }
+            }
+            return;
+          }
+          finishLiveUserTranscript();
+          appendLiveMessage(text);
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        clearConnectTimeout();
+        clearLiveStandbyIdleTimer();
+        if (socket === liveSocketRef.current) {
+          liveSocketRef.current = null;
+          liveSocketReadyRef.current = false;
+        }
+        if (
+          liveCaptureRequestedRef.current &&
+          !liveExpectedCloseRef.current &&
+          !liveManualStopRef.current &&
+          liveReconnectAttemptRef.current < 3
+        ) {
+          liveReconnectAttemptRef.current += 1;
+          setVoiceStatus("connecting");
+          liveReconnectTimerRef.current = window.setTimeout(
+            () => {
+              stopVoiceSession(false);
+              void startVoiceSessionRef.current(false);
+            },
+            700 + liveReconnectAttemptRef.current * 450,
+          );
+          return;
+        }
+
+        if (liveCaptureRequestedRef.current) {
+          setVoiceStatus((current) => (current === "error" ? "error" : "idle"));
+        }
+        liveCaptureRequestedRef.current = false;
+      });
+
+      socket.addEventListener("error", () => {
+        clearConnectTimeout();
+        if (!socketOpened) {
+          liveExpectedCloseRef.current = true;
+        }
+        if (liveCaptureRequestedRef.current) {
+          setVoiceError(
+            "Live voice connection failed. Check the proxy and try again.",
+          );
+          setVoiceStatus("error");
+        }
+      });
+
+    },
+    [
+      appendLiveMessage,
+      appendLiveAssistantDelta,
+      clearLiveAssistantDraft,
+      clearLiveResumeTimer,
+      clearLiveStandbyIdleTimer,
+      finishLiveUserTranscript,
+      finalizeLiveAssistantMessage,
+      pauseLiveInput,
+      playLiveAudio,
+      resumeLiveInputAfterPlayback,
+      scheduleLiveStandbyClose,
+      sessionId,
+      startLiveCaptureForSocket,
+      stopLivePlayback,
+      stopVoiceSession,
+      upsertLiveUserTranscript,
+    ],
+  );
+
+  const prewarmLiveSession = useCallback(async () => {
+    if (
+      authStatus !== "authenticated" ||
+      voiceActive ||
+      liveSocketRef.current?.readyState === WebSocket.OPEN ||
+      liveSocketRef.current?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
+    try {
+      await connectLiveSocket(false);
+    } catch {
+      if (!liveCaptureRequestedRef.current) {
+        liveSocketRef.current = null;
+        liveSocketReadyRef.current = false;
+      }
+    }
+  }, [authStatus, connectLiveSocket, voiceActive]);
+
+  const startVoiceSession = useCallback(
+    async (resetReconnect = true) => {
+      if (authStatus !== "authenticated") {
+        setChatPanelOpen(true);
+        setMediaSheetOpen(false);
+        setUploadAuthRequired(false);
+        setVoiceAuthRequired(true);
+        setVoiceActive(false);
+        setVoiceStatus("idle");
+        liveCaptureRequestedRef.current = false;
+        return;
+      }
+
+      liveManualStopRef.current = false;
+      liveExpectedCloseRef.current = false;
+      liveInputPausedRef.current = false;
+      liveCaptureRequestedRef.current = true;
       clearLiveResumeTimer();
+      clearLiveStandbyIdleTimer();
       if (resetReconnect) {
         liveReconnectAttemptRef.current = 0;
         liveSentMediaIdsRef.current.clear();
@@ -885,190 +1236,23 @@ export function ChatView() {
 
       try {
         await ensurePlaybackContext();
-        await prepareLiveWebSocketSession();
-        const generation = ++liveSessionGenerationRef.current;
-
-        const socket = new WebSocket(
-          getLiveWebSocketUrl(sessionId || getOrCreateMochiSessionId()),
-        );
-        liveSocketRef.current = socket;
-        let socketOpened = false;
-        const clearConnectTimeout = () => {
-          if (liveConnectTimeoutRef.current !== null) {
-            window.clearTimeout(liveConnectTimeoutRef.current);
-            liveConnectTimeoutRef.current = null;
-          }
-        };
-        liveConnectTimeoutRef.current = window.setTimeout(() => {
-          if (
-            liveSessionGenerationRef.current !== generation ||
-            socket.readyState !== WebSocket.CONNECTING
-          ) {
-            return;
-          }
-          liveExpectedCloseRef.current = true;
-          setVoiceError(
-            "Live voice connection timed out. Check the websocket URL and gateway.",
-          );
-          setVoiceStatus("error");
-          socket.close();
-        }, LIVE_CONNECT_TIMEOUT_MS);
-
-        socket.addEventListener("open", () => {
-          clearConnectTimeout();
-          socketOpened = true;
-          if (liveSessionGenerationRef.current !== generation) {
-            socket.close();
-            return;
-          }
-          socket.send(
-            JSON.stringify({
-              type: "start",
-              session_id: sessionId || getOrCreateMochiSessionId(),
-              source: "chat",
-              mode: "voice",
-            }),
-          );
-        });
-
-        socket.addEventListener("message", (event) => {
-          const parsed = parseLiveEvent(event.data);
-          if (!parsed) return;
-
-          const eventType = parsed.type ?? parsed.event;
-          if (eventType === "ready" || eventType === "live_ready") {
-            if (!liveInputPausedRef.current) setVoiceStatus("listening");
-            return;
-          }
-          if (eventType === "live_setup_complete") {
-            void startLiveCapture(socket, generation).then(() => {
-              attachments.forEach(sendOrQueueLiveMediaAttachment);
-              flushQueuedLiveMediaAttachments();
-            });
-            return;
-          }
-          if (eventType === "media_received") {
-            return;
-          }
-
-          if (eventType === "error") {
-            setVoiceError(
-              parsed.message ?? parsed.error ?? "Live voice connection failed.",
-            );
-            setVoiceStatus("error");
-            return;
-          }
-
-          if (eventType === "done" || parsed.done) {
-            void resumeLiveInputAfterPlayback();
-            return;
-          }
-          if (eventType === "live_response_start") {
-            pauseLiveInput();
-            return;
-          }
-          if (eventType === "live_response_end") {
-            void resumeLiveInputAfterPlayback();
-            return;
-          }
-          if (eventType === "live_interrupted") {
-            liveInputPausedRef.current = false;
-            clearLiveResumeTimer();
-            clearLiveAssistantDraft();
-            stopLivePlayback();
-            setVoiceStatus("listening");
-            return;
-          }
-
-          const audio =
-            parsed.audio ??
-            (eventType === "audio" || eventType === "live_audio"
-              ? parsed.data
-              : undefined);
-          if (audio) {
-            pauseLiveInput();
-            void playLiveAudio(audio);
-            return;
-          }
-
-          const text =
-            parsed.content ??
-            parsed.text ??
-            parsed.message ??
-            parsed.transcript;
-          if (text) {
-            if (eventType === "live_transcript" && parsed.role === "user") {
-              if (!liveInputPausedRef.current) setVoiceStatus("speaking");
-              upsertLiveUserTranscript(text);
-              return;
-            }
-            if (
-              eventType === "live_transcript" &&
-              parsed.role === "assistant"
-            ) {
-              pauseLiveInput();
-              finishLiveUserTranscript();
-              appendLiveAssistantDelta(text);
-              return;
-            }
-            if (eventType === "message") {
-              if (parsed.role === "assistant") {
-                pauseLiveInput();
-                finishLiveUserTranscript();
-                finalizeLiveAssistantMessage(text);
-                void resumeLiveInputAfterPlayback();
-              } else {
-                if (parsed.role === "user") {
-                  const alreadyShown =
-                    liveLastUserTranscriptRef.current.trim() &&
-                    textsOverlap(liveLastUserTranscriptRef.current, text);
-                  if (!alreadyShown) {
-                    upsertLiveUserTranscript(text, "sent");
-                  }
-                  finishLiveUserTranscript();
-                } else {
-                  appendLiveMessage(text);
-                }
-              }
-              return;
-            }
-            finishLiveUserTranscript();
-            appendLiveMessage(text);
-          }
-        });
-
-        socket.addEventListener("close", () => {
-          clearConnectTimeout();
-          if (
-            !liveExpectedCloseRef.current &&
-            !liveManualStopRef.current &&
-            liveReconnectAttemptRef.current < 3
-          ) {
-            liveReconnectAttemptRef.current += 1;
-            setVoiceStatus("connecting");
-            liveReconnectTimerRef.current = window.setTimeout(
-              () => {
-                stopVoiceSession(false);
-                void startVoiceSessionRef.current(false);
-              },
-              700 + liveReconnectAttemptRef.current * 450,
-            );
-            return;
-          }
-
-          setVoiceStatus((current) => (current === "error" ? "error" : "idle"));
-        });
-
-        socket.addEventListener("error", () => {
-          clearConnectTimeout();
-          if (!socketOpened) {
-            liveExpectedCloseRef.current = true;
-          }
-          setVoiceError(
-            "Live voice connection failed. Check the proxy and try again.",
-          );
-          setVoiceStatus("error");
-        });
+        const socket = liveSocketRef.current;
+        const generation = liveSessionGenerationRef.current;
+        if (
+          socket?.readyState === WebSocket.OPEN &&
+          liveSocketReadyRef.current
+        ) {
+          startLiveCaptureForSocket(socket, generation);
+          return;
+        }
+        if (
+          socket?.readyState === WebSocket.OPEN ||
+          socket?.readyState === WebSocket.CONNECTING
+        ) {
+          liveCaptureRequestedRef.current = true;
+          return;
+        }
+        await connectLiveSocket(true);
       } catch {
         stopVoiceSession(false);
         setVoiceActive(false);
@@ -1079,30 +1263,38 @@ export function ChatView() {
       }
     },
     [
-      appendLiveMessage,
-      appendLiveAssistantDelta,
-      attachments,
-      clearLiveAssistantDraft,
+      authStatus,
       clearLiveResumeTimer,
+      clearLiveStandbyIdleTimer,
+      connectLiveSocket,
       ensurePlaybackContext,
-      finishLiveUserTranscript,
-      finalizeLiveAssistantMessage,
-      pauseLiveInput,
-      playLiveAudio,
-      flushQueuedLiveMediaAttachments,
-      resumeLiveInputAfterPlayback,
-      sendOrQueueLiveMediaAttachment,
-      sessionId,
-      startLiveCapture,
-      stopLivePlayback,
+      startLiveCaptureForSocket,
       stopVoiceSession,
-      upsertLiveUserTranscript,
     ],
   );
 
   useEffect(() => {
     startVoiceSessionRef.current = startVoiceSession;
   }, [startVoiceSession]);
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        void prewarmLiveSession();
+      }
+    }, LIVE_PREWARM_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [prewarmLiveSession]);
+
+  useEffect(() => {
+    if (authStatus === "authenticated") return;
+    if (!liveSocketRef.current && !liveCaptureRequestedRef.current) return;
+    stopVoiceSession();
+  }, [authStatus, stopVoiceSession]);
 
   const sendMutation = useMutation<
     SendMessageResult,
@@ -1783,6 +1975,7 @@ export function ChatView() {
         onSend={() => submit()}
         onStopGeneration={stopGeneration}
         onStartVoice={handleStartVoice}
+        onPrewarmVoice={() => void prewarmLiveSession()}
         onStopVoice={() => stopVoiceSession()}
         onOpenChat={() => setChatPanelOpen(true)}
         onCloseChat={() => setChatPanelOpen(false)}

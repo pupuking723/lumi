@@ -451,6 +451,7 @@ export function BottomActionControls({
   sendDisabled,
   onSend,
   onStopGeneration,
+  onPrewarmVoice,
   onStartVoice,
   onStopVoice,
   onOpenChat,
@@ -465,6 +466,7 @@ export function BottomActionControls({
   sendDisabled: boolean;
   onSend: () => void;
   onStopGeneration: () => void;
+  onPrewarmVoice: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
   onOpenChat: () => void;
@@ -498,6 +500,7 @@ export function BottomActionControls({
           aria-label="Start live voice chat"
           variant="secondary"
           size="icon"
+          onPointerDown={onPrewarmVoice}
           onClick={onStartVoice}
           className="fixed bottom-[calc(1.05rem+env(safe-area-inset-bottom))] right-6 z-40 rounded-full text-[#5f586f] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_16px_34px_rgba(42,39,55,0.16)] hover:text-[#302d43] md:right-[max(1.5rem,calc((100vw-264px-760px)/2+1.5rem))]"
         >

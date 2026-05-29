@@ -652,19 +652,39 @@ ${JSON.stringify({
 
   it("prompts users to sign in before starting live voice", async () => {
     const getUserMedia = vi.fn();
+    const WebSocketMock = vi.fn();
+    Object.assign(WebSocketMock, {
+      CONNECTING: 0,
+      OPEN: 1,
+      CLOSED: 3,
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch");
     Object.defineProperty(navigator, "mediaDevices", {
       value: { getUserMedia },
+      configurable: true,
+    });
+    Object.defineProperty(window, "WebSocket", {
+      value: WebSocketMock,
       configurable: true,
     });
 
     renderWithQueryClient(<ChatView />);
 
     await screen.findByPlaceholderText("Ask Mochi...");
-    fireEvent.click(screen.getByRole("button", { name: "Start live voice chat" }));
+    const voiceButton = screen.getByRole("button", {
+      name: "Start live voice chat",
+    });
+    fireEvent.pointerDown(voiceButton);
+    fireEvent.click(voiceButton);
 
     expect(
       await screen.findByText("Sign in to use live voice with Mochi."),
     ).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/live/session",
+      expect.anything(),
+    );
+    expect(WebSocketMock).not.toHaveBeenCalled();
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
