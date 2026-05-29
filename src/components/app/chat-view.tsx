@@ -959,7 +959,8 @@ export function ChatView() {
       liveManualStopRef.current = false;
       liveExpectedCloseRef.current = false;
       liveInputPausedRef.current = false;
-      liveCaptureRequestedRef.current = captureRequested;
+      liveCaptureRequestedRef.current =
+        captureRequested || liveCaptureRequestedRef.current;
       liveSocketReadyRef.current = false;
 
       const generation = ++liveSessionGenerationRef.current;
