@@ -6,6 +6,7 @@ import {
   resolveGoClawProxyAuth,
 } from "@/lib/api/go-claw-env";
 import { resolveProxyAcceptLanguage } from "@/lib/api/language";
+import { normalizePayloadMediaImageUrl } from "@/lib/api/media-url";
 
 export const dynamic = "force-dynamic";
 
@@ -69,5 +70,7 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(text.trim() ? JSON.parse(text) : {});
+  return NextResponse.json(
+    text.trim() ? normalizePayloadMediaImageUrl(JSON.parse(text)) : {},
+  );
 }

@@ -88,4 +88,34 @@ describe("OOTD reports proxy route", () => {
       }),
     );
   });
+
+  it("normalizes backend media URLs to the frontend media proxy", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "report-1",
+          mediaId: "media-1",
+          imageUrl: "/v1/media/media-1",
+        }),
+        {
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(
+      new Request("https://lumi.test/api/closy/ootd/reports", {
+        method: "POST",
+        body: JSON.stringify({ media_id: "media-1" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        imageUrl: "/api/media/media-1",
+      }),
+    );
+  });
 });

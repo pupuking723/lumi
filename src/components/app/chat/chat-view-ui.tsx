@@ -703,6 +703,7 @@ function isDisplayableChatImage(src: string) {
   return (
     src.startsWith("blob:") ||
     src.startsWith("data:") ||
+    src.startsWith("/api/media/") ||
     src.startsWith("http://") ||
     src.startsWith("https://")
   );

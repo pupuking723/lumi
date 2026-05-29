@@ -19,7 +19,7 @@ import {
   StandaloneMediaButton,
 } from "./chat/chat-view-ui";
 import {
-  downloadOotdLongImage,
+  downloadOotdShareImage,
   OotdReportModal,
 } from "./ootd-report-modal";
 import { apiClient } from "@/lib/api/client";
@@ -98,9 +98,35 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function isShareCardOnCurrentOrigin(shareCard: OotdShareCard) {
+  if (typeof window === "undefined") return true;
+  try {
+    return new URL(shareCard.shortUrl).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function ootdShareTitle(report: OotdReport) {
+  return report.shareCard?.title || report.todayJudgment.title || "Mochi OOTD";
+}
+
+function ootdShareDescription(report: OotdReport) {
+  return (
+    report.shareCard?.quote ||
+    report.mochiLine ||
+    report.todayJudgment.summary ||
+    ootdShareTitle(report)
+  ).trim();
+}
+
+function ootdShareText(report: OotdReport, url: string) {
+  return `${ootdShareDescription(report)} ${url}`.trim();
+}
+
 function summarizeOotdReport(report: OotdReport) {
-  const suggestions = report.suggestions
-    .map((item) => `${item.title}: ${item.body}`)
+  const suggestions = (report.suggestions ?? [])
+    .map((item) => [item.title, item.body].filter(Boolean).join(": "))
     .filter((item) => item.trim())
     .slice(0, 2)
     .join(" | ");
@@ -108,7 +134,7 @@ function summarizeOotdReport(report: OotdReport) {
     `Judgment: ${report.todayJudgment.title} (${report.todayJudgment.score}/10, ${report.todayJudgment.label}).`,
     report.todayJudgment.summary,
     report.overallStyle ? `Style: ${report.overallStyle}.` : "",
-    report.highlights.length ? `Highlights: ${report.highlights.join("; ")}.` : "",
+    report.highlights?.length ? `Highlights: ${report.highlights.join("; ")}.` : "",
     report.biggestIssue ? `Biggest issue: ${report.biggestIssue}.` : "",
     suggestions ? `Suggestions: ${suggestions}.` : "",
     report.mochiLine ? `Mochi line: ${report.mochiLine}` : "",
@@ -181,6 +207,9 @@ export function ChatView() {
   const [ootdShareCard, setOotdShareCard] = useState<OotdShareCard | null>(
     null,
   );
+  const [ootdShareFallbackOpen, setOotdShareFallbackOpen] = useState(false);
+  const [ootdShareError, setOotdShareError] = useState("");
+  const [ootdShareInProgress, setOotdShareInProgress] = useState(false);
   const [ootdActiveMediaId, setOotdActiveMediaId] = useState<string | null>(
     null,
   );
@@ -1273,6 +1302,8 @@ export function ChatView() {
       if (options.open) {
         setOotdActiveMediaId(mediaId);
         setOotdShareCard(null);
+        setOotdShareFallbackOpen(false);
+        setOotdShareError("");
         setOotdReportOpen(true);
       }
       if (existing) {
@@ -1596,17 +1627,62 @@ export function ChatView() {
       ? activeOotdState.report.imageUrl
       : "");
 
-  const saveOotdLongImage = async () => {
-    if (!visibleOotdReport) return;
+  const getOotdShareCard = async (report: OotdReport) => {
     let shareCard = ootdShareCard;
-    if (!shareCard) {
-      shareCard = await ootdShareCardMutation.mutateAsync(visibleOotdReport.id);
+    if (!shareCard || !isShareCardOnCurrentOrigin(shareCard)) {
+      shareCard = await ootdShareCardMutation.mutateAsync(report.id);
     }
-    await downloadOotdLongImage({
-      report: visibleOotdReport,
-      imageUrl: visibleOotdImageUrl || visibleOotdReport.imageUrl,
-      shareCard,
-    });
+    return shareCard;
+  };
+
+  const shareOotdReport = async () => {
+    if (!visibleOotdReport || ootdShareInProgress) return;
+    setOotdShareInProgress(true);
+    setOotdShareError("");
+    try {
+      await getOotdShareCard(visibleOotdReport);
+      setOotdShareFallbackOpen(true);
+    } catch (error) {
+      setOotdShareError(
+        error instanceof Error
+          ? error.message
+          : "Sharing failed. Use another option.",
+      );
+      setOotdShareFallbackOpen(true);
+    } finally {
+      setOotdShareInProgress(false);
+    }
+  };
+
+  const copyOotdShareLink = async () => {
+    if (!visibleOotdReport) return;
+    try {
+      const shareCard = await getOotdShareCard(visibleOotdReport);
+      await navigator.clipboard?.writeText(
+        ootdShareText(visibleOotdReport, shareCard.shortUrl),
+      );
+      setOotdShareError("");
+    } catch (error) {
+      setOotdShareError(
+        error instanceof Error ? error.message : "Copy failed.",
+      );
+    }
+  };
+
+  const downloadOotdShareImageFallback = async () => {
+    if (!visibleOotdReport) return;
+    try {
+      const shareCard = await getOotdShareCard(visibleOotdReport);
+      await downloadOotdShareImage({
+        report: visibleOotdReport,
+        imageUrl: visibleOotdImageUrl || visibleOotdReport.imageUrl,
+        shareCard,
+      });
+    } catch (error) {
+      setOotdShareError(
+        error instanceof Error ? error.message : "Download failed.",
+      );
+    }
   };
 
   return (
@@ -1720,10 +1796,22 @@ export function ChatView() {
         error={
           activeOotdState?.status === "failed" ? activeOotdState.error : ""
         }
-        sharePending={ootdShareCardMutation.isPending}
-        onClose={() => setOotdReportOpen(false)}
-        onSaveLongImage={() => {
-          void saveOotdLongImage();
+        sharePending={ootdShareCardMutation.isPending || ootdShareInProgress}
+        shareFallbackOpen={ootdShareFallbackOpen}
+        shareError={ootdShareError}
+        onClose={() => {
+          setOotdReportOpen(false);
+          setOotdShareFallbackOpen(false);
+          setOotdShareError("");
+        }}
+        onShare={() => {
+          void shareOotdReport();
+        }}
+        onCopyShareLink={() => {
+          void copyOotdShareLink();
+        }}
+        onDownloadShareImage={() => {
+          void downloadOotdShareImageFallback();
         }}
       />
     </AppChrome>

@@ -8,6 +8,7 @@ import {
   isPartialOotdReportContent,
   parseOotdReportContent,
 } from "@/lib/ootd-report-content";
+import { normalizeMediaImageUrl } from "@/lib/api/media-url";
 
 export interface GoClawChatMessage {
   role: "user" | "assistant" | "system";
@@ -163,7 +164,7 @@ function extractHistoryMediaRefs(content: string): ChatAttachment[] {
       media_id: attributes.match(/\bid=(["'])(.*?)\1/)?.[2] ?? url,
       source: "chat",
       role: "user",
-      previewUrl: url,
+      previewUrl: normalizeMediaImageUrl(url),
     });
   }
 
@@ -191,7 +192,7 @@ export function toLumiChatMessages(
           media_id: ref.id as string,
           source: "chat" as const,
           role: "user" as const,
-          previewUrl: ref.preview_url ?? ref.url,
+          previewUrl: normalizeMediaImageUrl(ref.preview_url ?? ref.url),
           mimeType: ref.mime_type,
         }));
       const attachments = [

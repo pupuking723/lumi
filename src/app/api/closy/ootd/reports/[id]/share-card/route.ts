@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth/options";
 import {
   getGoClawBaseUrl,
-  getGoClawTenantId,
-  getGoClawToken,
-  getGoClawUserId,
+  resolveGoClawProxyAuth,
 } from "@/lib/api/go-claw-env";
 
 export const dynamic = "force-dynamic";
@@ -12,15 +12,54 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+function frontendOrigin(request: Request) {
+  const requestUrl = new URL(request.url);
+  const host = request.headers.get("host") ?? requestUrl.host;
+  return `${requestUrl.protocol}//${host}`;
+}
+
+function normalizeShareCardLinks(value: unknown, origin: string) {
+  if (!value || typeof value !== "object") return value;
+  const shareCard = value as Record<string, unknown>;
+  if (typeof shareCard.shortUrl !== "string") return shareCard;
+
+  let shortUrl: URL;
+  try {
+    shortUrl = new URL(shareCard.shortUrl);
+  } catch {
+    return shareCard;
+  }
+  if (shortUrl.pathname.startsWith("/s/closy/")) {
+    const publicShortUrl = `${origin}${shortUrl.pathname}`;
+    shareCard.shortUrl = publicShortUrl;
+    shareCard.qrImageUrl = qrImageUrl(publicShortUrl);
+  }
+  return shareCard;
+}
+
+function qrImageUrl(value: string) {
+  const params = new URLSearchParams({ size: "160x160", data: value });
+  return `https://api.qrserver.com/v1/create-qr-code/?${params.toString()}`;
+}
+
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
   const baseUrl = getGoClawBaseUrl();
-  const token = getGoClawToken();
-  const userId = getGoClawUserId();
-  const tenantId = getGoClawTenantId();
+  const session = await getServerSession(authOptions);
+  const auth = resolveGoClawProxyAuth(session);
+  const requestUrl = new URL(request.url);
+  const forwardedHost = request.headers.get("host") ?? requestUrl.host;
+  const forwardedProto = requestUrl.protocol.replace(":", "") || "http";
+
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Google sign-in is required." },
+      { status: 401 },
+    );
+  }
 
   let upstreamResponse: Response;
   try {
@@ -30,10 +69,12 @@ export async function POST(
         method: "POST",
         cache: "no-store",
         headers: {
-          "X-GoClaw-User-Id": userId,
-          "X-GoClaw-Tenant-Id": tenantId,
+          "X-GoClaw-User-Id": auth.userId,
+          "X-GoClaw-Tenant-Id": auth.tenantId,
+          "X-Forwarded-Host": forwardedHost,
+          "X-Forwarded-Proto": forwardedProto,
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${auth.token}`,
         },
         body: JSON.stringify({}),
       },
@@ -60,5 +101,8 @@ export async function POST(
     );
   }
 
-  return NextResponse.json(text.trim() ? JSON.parse(text) : {});
+  const payload = text.trim() ? JSON.parse(text) : {};
+  return NextResponse.json(
+    normalizeShareCardLinks(payload, frontendOrigin(request)),
+  );
 }

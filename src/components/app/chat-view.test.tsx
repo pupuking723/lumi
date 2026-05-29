@@ -137,6 +137,18 @@ describe("ChatView", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
   });
 
   it("sends text messages and renders streaming assistant deltas", async () => {
@@ -672,12 +684,255 @@ ${JSON.stringify({
     fireEvent.click(await screen.findByRole("button", { name: "OOTD report" }));
 
     expect(await screen.findByText("City Casual Minimalism")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Share" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Save long photo/i }),
+    ).not.toBeInTheDocument();
     expect(apiMocks.createOotdReport).toHaveBeenCalledWith(
       expect.objectContaining({
         media_id: "media-1",
         scene: "daily",
       }),
     );
+  });
+
+  it("opens an OOTD report when only the core judgment fields are present", async () => {
+    apiMocks.createOotdReport.mockResolvedValueOnce({
+      id: "report-core",
+      mediaId: "media-1",
+      imageUrl: "",
+      status: "completed",
+      todayJudgment: {
+        title: "Clean enough",
+        score: 7,
+        label: "Wearable",
+      },
+      createdAt: "2026-05-25T00:00:00.000Z",
+    });
+
+    const { container } = renderWithQueryClient(<ChatView />);
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["image"], "look.png", { type: "image/png" })],
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "OOTD report" }));
+
+    expect(await screen.findByText("Clean enough")).toBeInTheDocument();
+    expect(screen.getByText("7.0")).toBeInTheDocument();
+    expect(screen.getByText("Wearable")).toBeInTheDocument();
+    expect(screen.queryByText("Overall style")).not.toBeInTheDocument();
+    expect(screen.queryByText("Color DNA")).not.toBeInTheDocument();
+  });
+
+  it("keeps the OOTD modal open when share-card creation fails", async () => {
+    apiMocks.createOotdShareCard.mockRejectedValueOnce(
+      new Error("Mochi could not create the share card."),
+    );
+
+    const { container } = renderWithQueryClient(<ChatView />);
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["image"], "look.png", { type: "image/png" })],
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "OOTD report" }));
+    expect(await screen.findByText("City Casual Minimalism")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    expect(
+      await screen.findByText("Mochi could not create the share card."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "OOTD report" }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the channel share panel instead of native share", async () => {
+    const shareMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: shareMock,
+    });
+
+    const { container } = renderWithQueryClient(<ChatView />);
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["image"], "look.png", { type: "image/png" })],
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "OOTD report" }));
+    expect(await screen.findByText("City Casual Minimalism")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    expect(await screen.findByRole("link", { name: /Facebook/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /WhatsApp/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Telegram/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download/i })).toBeInTheDocument();
+    expect(shareMock).not.toHaveBeenCalled();
+  });
+
+  it("puts description copy and the share link into every channel URL", async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: writeTextMock },
+    });
+    const { container } = renderWithQueryClient(<ChatView />);
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["image"], "look.png", { type: "image/png" })],
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "OOTD report" }));
+    expect(await screen.findByText("City Casual Minimalism")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    const expectedUrl = encodeURIComponent("https://lumi.style/ootd/report-1");
+    const expectedText = encodeURIComponent(
+      "The base is fine; give it a backbone.",
+    );
+    const whatsapp = await screen.findByRole("link", { name: /WhatsApp/i });
+    const x = screen.getByRole("link", { name: /^X$/i });
+    const telegram = screen.getByRole("link", { name: /Telegram/i });
+    const facebook = screen.getByRole("link", { name: /Facebook/i });
+
+    expect(whatsapp).toHaveAttribute(
+      "href",
+      expect.stringContaining(expectedText),
+    );
+    expect(whatsapp).toHaveAttribute(
+      "href",
+      expect.stringContaining(expectedUrl),
+    );
+    expect(x).toHaveAttribute("href", expect.stringContaining(expectedText));
+    expect(x).toHaveAttribute("href", expect.stringContaining(expectedUrl));
+    expect(x).toHaveAttribute(
+      "href",
+      expect.stringContaining("https://x.com/intent/post"),
+    );
+    expect(telegram).toHaveAttribute(
+      "href",
+      expect.stringContaining(expectedText),
+    );
+    expect(telegram).toHaveAttribute(
+      "href",
+      expect.stringContaining(expectedUrl),
+    );
+    expect(facebook).toHaveAttribute(
+      "href",
+      expect.stringContaining(expectedText),
+    );
+    expect(facebook).toHaveAttribute(
+      "href",
+      expect.stringContaining(expectedUrl),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy/i }));
+    await waitFor(() =>
+      expect(writeTextMock).toHaveBeenCalledWith(
+        "The base is fine; give it a backbone. https://lumi.style/ootd/report-1",
+      ),
+    );
+  });
+
+  it("does not prepare a native share image until download is requested", async () => {
+    const shareMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: shareMock,
+    });
+    const context = {
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 0,
+      font: "",
+      textAlign: "left",
+      fillRect: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arcTo: vi.fn(),
+      closePath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      clip: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: vi.fn((text: string) => ({ width: text.length * 12 })),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context);
+    const toBlobMock = vi
+      .spyOn(HTMLCanvasElement.prototype, "toBlob")
+      .mockImplementation((callback: BlobCallback) => {
+        callback(new Blob(["image"], { type: "image/png" }));
+      });
+    class MockImage {
+      crossOrigin = "";
+      naturalWidth = 100;
+      naturalHeight = 100;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      set src(_value: string) {
+        window.setTimeout(() => this.onload?.(), 0);
+      }
+    }
+    vi.stubGlobal("Image", MockImage);
+
+    const { container } = renderWithQueryClient(<ChatView />);
+    const fileInput = container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["image"], "look.png", { type: "image/png" })],
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "OOTD report" }));
+    await screen.findByText("City Casual Minimalism");
+    expect(toBlobMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    expect(await screen.findByRole("button", { name: /Download/i })).toBeInTheDocument();
+    expect(shareMock).not.toHaveBeenCalled();
+    expect(toBlobMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Download/i }));
+
+    await waitFor(() => expect(toBlobMock).toHaveBeenCalledTimes(1));
+    expect(toBlobMock).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the OOTD action on the sent image after the composer clears", async () => {
