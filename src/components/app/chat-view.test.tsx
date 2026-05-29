@@ -784,6 +784,9 @@ ${JSON.stringify({
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
 
     expect(await screen.findByRole("link", { name: /Facebook/i })).toBeInTheDocument();
+    expect(
+      screen.getByText("Copy the text and link, then download the image to share."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /WhatsApp/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Telegram/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Download/i })).toBeInTheDocument();

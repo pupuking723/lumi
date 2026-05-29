@@ -147,7 +147,7 @@ export function OotdReportModal({
                     )}
                   </div>
                   <p className="min-w-0 flex-1 text-sm font-bold text-[#5d566b]">
-                    Share the image, or send the link back to Lumi.
+                    Copy the text and link, then download the image to share.
                   </p>
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
