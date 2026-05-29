@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { getGoClawBaseUrl } from "@/lib/api/go-claw-env";
+import {
+  publicUrl,
+  resolvePublicRequestParts,
+} from "@/lib/api/public-origin";
 
 export const dynamic = "force-dynamic";
 
 function getForwardedHeaders(request: Request) {
-  const requestUrl = new URL(request.url);
+  const { host, proto } = resolvePublicRequestParts(request);
   return {
-    host: request.headers.get("host") ?? requestUrl.host,
-    proto: requestUrl.protocol.replace(":", "") || "http",
+    host,
+    proto,
   };
 }
 
@@ -16,21 +20,39 @@ function wantsJSON(request: Request) {
   return accept.includes("application/json") || accept.includes("text/json");
 }
 
+function wantsSocialPreview(request: Request) {
+  const userAgent = request.headers.get("user-agent")?.toLowerCase() ?? "";
+  if (!userAgent) return false;
+  return [
+    "facebookexternalhit",
+    "facebot",
+    "twitterbot",
+    "telegrambot",
+    "whatsapp",
+    "linkedinbot",
+    "slackbot",
+    "discordbot",
+    "pinterest",
+    "embedly",
+    "quora link preview",
+    "vkshare",
+    "redditbot",
+  ].some((bot) => userAgent.includes(bot));
+}
+
 function frontendShareUrl(request: Request, slug: string) {
-  const requestUrl = new URL(request.url);
-  requestUrl.pathname = `/s/closy/${slug}`;
-  requestUrl.search = "";
-  return requestUrl.toString();
+  return publicUrl(request, `/s/closy/${slug}`);
 }
 
 function appRedirectUrl(request: Request, slug: string) {
-  const requestUrl = new URL(request.url);
-  requestUrl.pathname = "/";
-  requestUrl.search = new URLSearchParams({
-    from: "mochi_share",
-    share: slug,
-  }).toString();
-  return requestUrl.toString();
+  return publicUrl(
+    request,
+    "/",
+    new URLSearchParams({
+      from: "mochi_share",
+      share: slug,
+    }),
+  );
 }
 
 async function fetchUpstreamShare(
@@ -91,7 +113,7 @@ function escapeHtml(value: string) {
 }
 
 function socialImageUrl(request: Request, title: string, description: string) {
-  const url = new URL("/api/closy/ootd/share-preview", request.url);
+  const url = new URL(publicUrl(request, "/api/closy/ootd/share-preview"));
   url.searchParams.set("title", title);
   url.searchParams.set("description", description);
   return url.toString();
@@ -176,6 +198,9 @@ export async function GET(
   }
 
   if (upstreamResponse?.ok) {
+    if (!wantsSocialPreview(request)) {
+      return NextResponse.redirect(appRedirectUrl(request, slug));
+    }
     const payload = payloadRecord(await upstreamResponse.json().catch(() => null));
     return new Response(socialHtml({ request, slug, payload }), {
       status: 200,
@@ -189,9 +214,8 @@ export async function GET(
     upstreamResponse = null;
   }
 
-  const location = upstreamResponse?.headers.get("location");
-  if (upstreamResponse && upstreamResponse.status >= 300 && upstreamResponse.status < 400 && location) {
-    return NextResponse.redirect(location, upstreamResponse.status);
+  if (upstreamResponse && upstreamResponse.status >= 300 && upstreamResponse.status < 400) {
+    return NextResponse.redirect(appRedirectUrl(request, slug), upstreamResponse.status);
   }
 
   return NextResponse.redirect(appRedirectUrl(request, slug));
