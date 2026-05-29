@@ -688,6 +688,124 @@ ${JSON.stringify({
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
+  it("starts capture when a voice click races with an in-flight prewarm", async () => {
+    authMocks.useSession.mockReturnValue({
+      data: {
+        user: {
+          name: "Wenyu Liu",
+          email: "wenyu@example.com",
+        },
+      },
+      status: "authenticated",
+    });
+    let resolveLiveSession!: () => void;
+    const socketConstructed = vi.fn();
+    const getUserMedia = vi.fn().mockResolvedValue({
+      getTracks: () => [{ stop: vi.fn() }],
+      getAudioTracks: () => [{ label: "Mic" }],
+    });
+    class MockWebSocket extends EventTarget {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 3;
+
+      readyState = MockWebSocket.CONNECTING;
+
+      constructor() {
+        super();
+        socketConstructed();
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: JSON.stringify({ type: "live_setup_complete" }),
+            }),
+          );
+        }, 0);
+      }
+
+      send() {
+        return undefined;
+      }
+
+      close() {
+        this.readyState = MockWebSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+    class MockAudioContext {
+      state = "running";
+      sampleRate = 48000;
+      destination = {};
+
+      resume() {
+        return Promise.resolve();
+      }
+
+      close() {
+        return Promise.resolve();
+      }
+
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+
+      createAnalyser() {
+        return {
+          fftSize: 256,
+          smoothingTimeConstant: 0.72,
+          frequencyBinCount: 8,
+          getByteFrequencyData: (data: Uint8Array) => data.fill(0),
+        };
+      }
+
+      createScriptProcessor() {
+        return { connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null };
+      }
+    }
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveLiveSession = () => resolve(new Response("{}", { status: 200 }));
+        }),
+    );
+    Object.defineProperty(window, "WebSocket", {
+      value: MockWebSocket,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "WebSocket", {
+      value: MockWebSocket,
+      configurable: true,
+    });
+    Object.defineProperty(window, "AudioContext", {
+      value: MockAudioContext,
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia },
+      configurable: true,
+    });
+
+    renderWithQueryClient(<ChatView />);
+
+    await screen.findByPlaceholderText("Ask Mochi...");
+    await waitFor(() =>
+      expect(apiMocks.listMessages).toHaveBeenCalledWith("conv-1", expect.any(String)),
+    );
+    const voiceButton = screen.getByRole("button", {
+      name: "Start live voice chat",
+    });
+    fireEvent.pointerDown(voiceButton);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(voiceButton);
+    resolveLiveSession();
+
+    await waitFor(() => expect(socketConstructed).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+  });
+
   it("creates an OOTD report from an uploaded image", async () => {
     const { container } = renderWithQueryClient(<ChatView />);
     const fileInput = container.querySelector(
