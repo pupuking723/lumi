@@ -163,6 +163,7 @@ export function ChatView() {
   const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const liveSocketRef = useRef<WebSocket | null>(null);
+  const liveResumptionHandleRef = useRef<string | null>(null);
   const liveAudioQueueRef = useRef<Promise<void>>(Promise.resolve());
   const livePlaybackTimeRef = useRef(0);
   const livePlaybackGenerationRef = useRef(0);
@@ -199,6 +200,12 @@ export function ChatView() {
   const [sessionId, setSessionId] = useState(() =>
     typeof window === "undefined" ? "" : getOrCreateMochiSessionId(),
   );
+  // 从 sessionStorage 恢复 resumption token（页面刷新后仍可快速重连）
+  useEffect(() => {
+    if (!sessionId) return;
+    const stored = sessionStorage.getItem(`live_rh_${sessionId}`);
+    if (stored) liveResumptionHandleRef.current = stored;
+  }, [sessionId]);
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
   const [lastSendStopped, setLastSendStopped] = useState(false);
   const [uploadAuthRequired, setUploadAuthRequired] = useState(false);
@@ -965,9 +972,11 @@ export function ChatView() {
 
       const generation = ++liveSessionGenerationRef.current;
       const liveSessionId = sessionId || getOrCreateMochiSessionId();
-      const socket = new WebSocket(getLiveWebSocketUrl(liveSessionId));
+      const resumeHandle = liveResumptionHandleRef.current;
+      const socket = new WebSocket(getLiveWebSocketUrl(liveSessionId, resumeHandle));
       liveSocketRef.current = socket;
       let socketOpened = false;
+      let setupCompleted = false;
 
       const clearConnectTimeout = () => {
         if (liveConnectTimeoutRef.current !== null) {
@@ -1018,7 +1027,22 @@ export function ChatView() {
         if (eventType === "ready" || eventType === "live_ready") {
           return;
         }
+        if (eventType === "live_resumption_token") {
+          const data = parsed.data;
+          const handle = (typeof data === "object" && data !== null ? (data as Record<string, unknown>).handle : null) as string | null ?? null;
+          liveResumptionHandleRef.current = handle;
+          if (handle && sessionId) {
+            sessionStorage.setItem(`live_rh_${sessionId}`, handle);
+          }
+          return;
+        }
+        if (eventType === "live_go_away") {
+          // GoAway 预警：提前重连，用户无感知
+          void connectLiveSocket(liveCaptureRequestedRef.current);
+          return;
+        }
         if (eventType === "live_setup_complete") {
+          setupCompleted = true;
           liveSocketReadyRef.current = true;
           if (liveCaptureRequestedRef.current) {
             startLiveCaptureForSocket(socket, generation);
@@ -1122,6 +1146,13 @@ export function ChatView() {
         if (socket === liveSocketRef.current) {
           liveSocketRef.current = null;
           liveSocketReadyRef.current = false;
+        }
+        // resumption token 失效降级：带 handle 但 setup 未完成 → 清 token 立即重试（不计重连次数）
+        if (resumeHandle && !setupCompleted && !liveManualStopRef.current && liveSessionGenerationRef.current === generation) {
+          liveResumptionHandleRef.current = null;
+          if (sessionId) sessionStorage.removeItem(`live_rh_${sessionId}`);
+          void connectLiveSocket(liveCaptureRequestedRef.current);
+          return;
         }
         if (
           liveCaptureRequestedRef.current &&
