@@ -129,25 +129,25 @@ export interface OotdReport {
     title: string;
     score: number;
     label: string;
-    summary: string;
+    summary?: string;
   };
-  overallStyle: string;
-  highlights: string[];
-  biggestIssue: string;
-  suggestions: Array<{
-    title: string;
-    body: string;
+  overallStyle?: string;
+  highlights?: string[];
+  biggestIssue?: string;
+  suggestions?: Array<{
+    title?: string;
+    body?: string;
   }>;
-  palette: Array<{
-    name: string;
-    hex: string;
+  palette?: Array<{
+    name?: string;
+    hex?: string;
   }>;
-  mochiLine: string;
-  shareCard: {
-    title: string;
-    quote: string;
-    advice: string[];
-    cta: string;
+  mochiLine?: string;
+  shareCard?: {
+    title?: string;
+    quote?: string;
+    advice?: string[];
+    cta?: string;
   };
   createdAt: string;
 }

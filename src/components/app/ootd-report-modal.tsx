@@ -1,8 +1,16 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Download, LoaderCircle, QrCode, X } from "lucide-react";
+import {
+  Copy,
+  Download,
+  LoaderCircle,
+  QrCode,
+  Share2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { normalizeMediaImageUrl } from "@/lib/api/media-url";
 import type { OotdReport, OotdShareCard } from "@/types/lumi";
 
 interface OotdReportModalProps {
@@ -13,8 +21,12 @@ interface OotdReportModalProps {
   pending: boolean;
   error?: string;
   sharePending: boolean;
+  shareFallbackOpen?: boolean;
+  shareError?: string;
   onClose: () => void;
-  onSaveLongImage: () => void;
+  onShare: () => void;
+  onCopyShareLink: () => void;
+  onDownloadShareImage: () => void;
 }
 
 export function OotdReportModal({
@@ -25,8 +37,12 @@ export function OotdReportModal({
   pending,
   error,
   sharePending,
+  shareFallbackOpen = false,
+  shareError,
   onClose,
-  onSaveLongImage,
+  onShare,
+  onCopyShareLink,
+  onDownloadShareImage,
 }: OotdReportModalProps) {
   if (!open) return null;
 
@@ -72,19 +88,22 @@ export function OotdReportModal({
         {!pending && report && (
           <footer className="shrink-0 border-t border-white/80 bg-[#f7f6f8]/94 px-4 py-4 backdrop-blur md:px-7">
             <div className="mx-auto flex max-w-[430px] flex-col gap-3 md:max-w-none md:flex-row md:items-center md:justify-between">
-              {shareCard?.shortUrl ? (
-                <div className="min-w-0 md:max-w-[360px]">
-                  <p className="text-sm font-extrabold">Share report</p>
+              <div className="min-w-0 md:max-w-[360px]">
+                <p className="text-sm font-extrabold">Share this look</p>
+                {shareCard?.shortUrl && (
                   <p className="mt-1 truncate text-xs font-bold text-[#766d85]">
                     {shareCard.shortUrl}
                   </p>
-                </div>
-              ) : (
-                <span aria-hidden className="hidden md:block" />
-              )}
+                )}
+                {shareError && (
+                  <p className="mt-1 text-xs font-bold text-[#9d3650]">
+                    {shareError}
+                  </p>
+                )}
+              </div>
               <div className="flex items-center gap-3">
                 {shareCard && (
-                  <div className="relative flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-white">
+                  <div className="relative hidden size-14 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-white md:flex">
                     {shareCard.qrImageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -99,24 +118,203 @@ export function OotdReportModal({
                 )}
                 <Button
                   type="button"
-                  onClick={onSaveLongImage}
+                  onClick={onShare}
                   disabled={sharePending}
-                  className="h-12 flex-1 rounded-full px-5 md:flex-none"
+                  className="h-12 flex-1 rounded-full px-6 md:flex-none"
                 >
                   {sharePending ? (
                     <LoaderCircle size={17} className="animate-spin" aria-hidden />
                   ) : (
-                    <Download size={17} aria-hidden />
+                    <Share2 size={17} aria-hidden />
                   )}
-                  Save long photo
+                  Share
                 </Button>
               </div>
             </div>
+            {shareFallbackOpen && shareCard?.shortUrl && (
+              <div className="mx-auto mt-3 max-w-[430px] rounded-[24px] border border-white/80 bg-white/82 p-3 shadow-[0_18px_50px_rgba(48,45,67,0.12)] md:max-w-none">
+                <div className="flex items-center gap-3">
+                  <div className="relative flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-[14px] bg-[#f7f6f8]">
+                    {shareCard.qrImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={shareCard.qrImageUrl}
+                        alt="Share QR code"
+                        className="size-full object-cover"
+                      />
+                    ) : (
+                      <QrCode size={23} aria-hidden />
+                    )}
+                  </div>
+                  <p className="min-w-0 flex-1 text-sm font-bold text-[#5d566b]">
+                    Copy the text and link, then download the image to share.
+                  </p>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  <ShareActionButton onClick={onCopyShareLink} icon={<Copy size={18} />}>
+                    Copy
+                  </ShareActionButton>
+                  <ShareActionLink
+                    href={whatsAppShareUrl(shareCard.shortUrl, report)}
+                    onClick={() => primeShareText(report, shareCard.shortUrl)}
+                    icon={<WhatsAppIcon />}
+                  >
+                    WhatsApp
+                  </ShareActionLink>
+                  <ShareActionLink
+                    href={xShareUrl(shareCard.shortUrl, report)}
+                    onClick={() => primeShareText(report, shareCard.shortUrl)}
+                    icon={<XBrandIcon />}
+                  >
+                    X
+                  </ShareActionLink>
+                  <ShareActionLink
+                    href={telegramShareUrl(shareCard.shortUrl, report)}
+                    onClick={() => primeShareText(report, shareCard.shortUrl)}
+                    icon={<TelegramIcon />}
+                  >
+                    Telegram
+                  </ShareActionLink>
+                  <ShareActionLink
+                    href={facebookShareUrl(shareCard.shortUrl, report)}
+                    onClick={() => primeShareText(report, shareCard.shortUrl)}
+                    icon={<FacebookIcon />}
+                  >
+                    Facebook
+                  </ShareActionLink>
+                  <ShareActionButton
+                    onClick={onDownloadShareImage}
+                    icon={<Download size={18} />}
+                  >
+                    Download
+                  </ShareActionButton>
+                </div>
+              </div>
+            )}
           </footer>
         )}
       </div>
     </div>
   );
+}
+
+function WhatsAppIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className="size-[18px] fill-current">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347M12.051 21.785h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.889-9.884 2.64.001 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884M20.463 3.488A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.946L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413" />
+    </svg>
+  );
+}
+
+function XBrandIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className="size-[15px] fill-current">
+      <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932Zm-1.291 19.491h2.039L6.486 3.24H4.298Z" />
+    </svg>
+  );
+}
+
+function TelegramIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className="size-[18px] fill-current">
+      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0m4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.692-1.653-1.123-2.678-1.799-1.185-.781-.417-1.21.258-1.911.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.831-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635" />
+    </svg>
+  );
+}
+
+function FacebookIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className="size-[18px] fill-current">
+      <path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.761 0 2.072.15 2.608.298v3.324c-.283-.03-.775-.045-1.386-.045-1.967 0-2.728.745-2.728 2.683v1.298h3.919l-.673 3.667h-3.246v7.98Z" />
+    </svg>
+  );
+}
+
+function ShareActionButton({
+  children,
+  icon,
+  onClick,
+}: {
+  children: ReactNode;
+  icon?: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-[4.25rem] min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] bg-[#f7f6f8] px-2 text-xs font-extrabold text-[#302d43]"
+    >
+      <span className="grid size-7 place-items-center rounded-full bg-white text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]">
+        {icon}
+      </span>
+      <span className="max-w-full truncate">{children}</span>
+    </button>
+  );
+}
+
+function ShareActionLink({
+  children,
+  href,
+  icon,
+  onClick,
+}: {
+  children: ReactNode;
+  href: string;
+  icon?: ReactNode;
+  onClick?: () => void;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={onClick}
+      className="flex h-[4.25rem] min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] bg-[#f7f6f8] px-2 text-xs font-extrabold text-[#302d43]"
+    >
+      <span className="grid size-7 place-items-center rounded-full bg-white text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]">
+        {icon}
+      </span>
+      <span className="max-w-full truncate">{children}</span>
+    </a>
+  );
+}
+
+function shareTitle(report: OotdReport) {
+  return report.shareCard?.title || report.todayJudgment.title || "Mochi OOTD";
+}
+
+function shareDescription(report: OotdReport) {
+  return (
+    report.shareCard?.quote ||
+    report.mochiLine ||
+    report.todayJudgment.summary ||
+    shareTitle(report)
+  ).trim();
+}
+
+function shareText(report: OotdReport, url: string) {
+  return `${shareDescription(report)} ${url}`.trim();
+}
+
+function primeShareText(report: OotdReport, url: string) {
+  void navigator.clipboard?.writeText(shareText(report, url));
+}
+
+function whatsAppShareUrl(url: string, report: OotdReport) {
+  return `https://wa.me/?text=${encodeURIComponent(shareText(report, url))}`;
+}
+
+function xShareUrl(url: string, report: OotdReport) {
+  return `https://x.com/intent/post?text=${encodeURIComponent(shareText(report, url))}`;
+}
+
+function telegramShareUrl(url: string, report: OotdReport) {
+  return `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(shareDescription(report))}`;
+}
+
+function facebookShareUrl(url: string, report: OotdReport) {
+  return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(shareDescription(report))}`;
 }
 
 function OotdLoadingState() {
@@ -147,14 +345,14 @@ function OotdReportBody({
   report: OotdReport;
   imageUrl?: string;
 }) {
-  const summary = report.todayJudgment.summary.trim();
-  const overallStyle = report.overallStyle.trim();
-  const biggestIssue = report.biggestIssue.trim();
-  const mochiLine = report.mochiLine.trim();
-  const palette = report.palette.filter((color) => color.hex && color.name);
-  const highlights = report.highlights.filter((item) => item.trim());
-  const suggestions = report.suggestions.filter(
-    (suggestion) => suggestion.title.trim() || suggestion.body.trim(),
+  const summary = report.todayJudgment.summary?.trim() ?? "";
+  const overallStyle = report.overallStyle?.trim() ?? "";
+  const biggestIssue = report.biggestIssue?.trim() ?? "";
+  const mochiLine = report.mochiLine?.trim() ?? "";
+  const palette = (report.palette ?? []).filter((color) => color.hex && color.name);
+  const highlights = (report.highlights ?? []).filter((item) => item.trim());
+  const suggestions = (report.suggestions ?? []).filter(
+    (suggestion) => suggestion.title?.trim() || suggestion.body?.trim(),
   );
 
   return (
@@ -227,12 +425,12 @@ function OotdReportBody({
             <div className="space-y-3">
               {suggestions.map((suggestion) => (
                 <div key={`${suggestion.title}-${suggestion.body}`}>
-                  {suggestion.title && (
+                  {suggestion.title?.trim() && (
                     <p className="text-sm font-extrabold">
                       {suggestion.title}
                     </p>
                   )}
-                  {suggestion.body && (
+                  {suggestion.body?.trim() && (
                     <p className="mt-1 text-[0.92rem] font-semibold leading-6 text-[#5d566b]">
                       {suggestion.body}
                     </p>
@@ -254,13 +452,15 @@ function OotdReportBody({
 }
 
 function OotdReportImage({ imageUrl }: { imageUrl?: string }) {
+  const normalizedImageUrl = normalizeMediaImageUrl(imageUrl);
+
   return (
     <div className="relative aspect-[4/5] overflow-hidden bg-[#ebe7ee] md:h-full md:min-h-0 md:aspect-auto">
-      {imageUrl ? (
+      {normalizedImageUrl ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={imageUrl}
+            src={normalizedImageUrl}
             alt=""
             aria-hidden
             className="absolute inset-0 size-full scale-110 object-cover opacity-70 blur-2xl"
@@ -268,7 +468,7 @@ function OotdReportImage({ imageUrl }: { imageUrl?: string }) {
           <div className="absolute inset-0 bg-[#302d43]/10" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={imageUrl}
+            src={normalizedImageUrl}
             alt="Uploaded OOTD"
             className="relative z-10 size-full object-contain"
           />
@@ -336,7 +536,7 @@ function OotdScoreRing({ score, label }: { score: number; label: string }) {
   );
 }
 
-export async function downloadOotdLongImage({
+export async function createOotdShareImageBlob({
   report,
   imageUrl,
   shareCard,
@@ -344,14 +544,14 @@ export async function downloadOotdLongImage({
   report: OotdReport;
   imageUrl?: string;
   shareCard?: OotdShareCard | null;
-}) {
+}): Promise<Blob | null> {
   const canvas = document.createElement("canvas");
   const width = 1080;
-  const height = 5200;
+  const height = 5600;
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return;
+  if (!ctx) return null;
 
   ctx.fillStyle = "#F7F6F8";
   ctx.fillRect(0, 0, width, height);
@@ -363,7 +563,10 @@ export async function downloadOotdLongImage({
   const bodyW = width - 172;
   let y = margin;
 
-  const photo = imageUrl ? await loadCanvasImage(imageUrl).catch(() => null) : null;
+  const normalizedImageUrl = normalizeMediaImageUrl(imageUrl);
+  const photo = normalizedImageUrl
+    ? await loadCanvasImage(normalizedImageUrl).catch(() => null)
+    : null;
   const qr = shareCard?.qrImageUrl
     ? await loadCanvasImage(shareCard.qrImageUrl).catch(() => null)
     : null;
@@ -378,7 +581,7 @@ export async function downloadOotdLongImage({
     ctx.fillStyle = "#EAE6EE";
     roundRect(ctx, cardX, y, cardW, 1260, 44);
     ctx.fill();
-    y = drawTextBlock(
+    drawTextBlock(
       ctx,
       "OOTD image",
       bodyX,
@@ -391,9 +594,23 @@ export async function downloadOotdLongImage({
   }
   y = margin + 1260 + 72;
 
-  y = drawTextBlock(ctx, report.todayJudgment.title, bodyX, y, bodyW, 54, "#302D43", "800", 8);
-  y += 28;
-  y = drawTextBlock(ctx, report.todayJudgment.summary, bodyX, y, bodyW, 34, "#5D566B", "700", 8);
+  y = drawTextBlock(
+    ctx,
+    report.todayJudgment.title,
+    bodyX,
+    y,
+    bodyW,
+    54,
+    "#302D43",
+    "800",
+    8,
+  );
+
+  const summary = report.todayJudgment.summary?.trim();
+  if (summary) {
+    y += 28;
+    y = drawTextBlock(ctx, summary, bodyX, y, bodyW, 34, "#5D566B", "700", 8);
+  }
   y += 66;
 
   drawScoreRing(ctx, width / 2, y + 190, 170, report.todayJudgment.score);
@@ -404,25 +621,53 @@ export async function downloadOotdLongImage({
   ctx.textAlign = "left";
   y += 515;
 
-  y = drawSectionDivider(ctx, bodyX, y, bodyW);
-  y = drawSection(ctx, "Overall style", report.overallStyle, y);
-  y = drawSectionDivider(ctx, bodyX, y, bodyW);
-  y = drawPaletteSection(ctx, report.palette, y, bodyX, bodyW);
-  y = drawSectionDivider(ctx, bodyX, y, bodyW);
-  y = drawListSection(ctx, "What works", report.highlights, y, bodyX, bodyW);
-  y = drawSectionDivider(ctx, bodyX, y, bodyW);
-  y = drawSection(ctx, "Biggest issue", report.biggestIssue, y);
-  y = drawSectionDivider(ctx, bodyX, y, bodyW);
-  y = drawSuggestionSection(ctx, report.suggestions, y, bodyX, bodyW);
+  const overallStyle = report.overallStyle?.trim();
+  if (overallStyle) {
+    y = drawSectionDivider(ctx, bodyX, y, bodyW);
+    y = drawSection(ctx, "Overall style", overallStyle, y, bodyX, bodyW);
+  }
 
-  ctx.fillStyle = "#302D43";
-  y = drawTextBlock(ctx, `“${report.mochiLine}”`, bodyX, y + 34, bodyW, 42, "#302D43", "800", 5);
-  y += 48;
+  const palette = (report.palette ?? []).filter((color) => color.hex && color.name);
+  if (palette.length > 0) {
+    y = drawSectionDivider(ctx, bodyX, y, bodyW);
+    y = drawPaletteSection(ctx, palette, y, bodyX, bodyW);
+  }
+
+  const highlights = (report.highlights ?? []).filter((item) => item.trim());
+  if (highlights.length > 0) {
+    y = drawSectionDivider(ctx, bodyX, y, bodyW);
+    y = drawListSection(ctx, "What works", highlights, y, bodyX, bodyW);
+  }
+
+  const biggestIssue = report.biggestIssue?.trim();
+  if (biggestIssue) {
+    y = drawSectionDivider(ctx, bodyX, y, bodyW);
+    y = drawSection(ctx, "Biggest issue", biggestIssue, y, bodyX, bodyW);
+  }
+
+  const suggestions = (report.suggestions ?? []).filter(
+    (suggestion) => suggestion.title?.trim() || suggestion.body?.trim(),
+  );
+  if (suggestions.length > 0) {
+    y = drawSectionDivider(ctx, bodyX, y, bodyW);
+    y = drawSuggestionSection(ctx, suggestions, y, bodyX, bodyW);
+  }
+
+  const mochiLine = report.mochiLine?.trim();
+  if (mochiLine) {
+    y += 46;
+    ctx.fillStyle = "#F18AAA";
+    roundRect(ctx, bodyX, y - 10, 8, 132, 4);
+    ctx.fill();
+    y = drawTextBlock(ctx, mochiLine, bodyX + 34, y + 34, bodyW - 34, 42, "#302D43", "800", 5);
+    y += 48;
+  }
 
   y = Math.max(y, y + 10);
   ctx.fillStyle = "#FBFAFC";
   roundRect(ctx, bodyX, y, bodyW, 190, 28);
   ctx.fill();
+
   ctx.fillStyle = "#302D43";
   ctx.font = "800 34px Arial";
   ctx.fillText("Lumi", bodyX + 28, y + 66);
@@ -430,7 +675,7 @@ export async function downloadOotdLongImage({
   ctx.fillStyle = "#7A7186";
   drawTextBlock(
     ctx,
-    shareCard?.shortUrl ?? report.shareCard.cta,
+    shareCard?.shortUrl ?? report.shareCard?.cta ?? "Try Lumi",
     bodyX + 28,
     y + 110,
     qr ? bodyW - 230 : bodyW - 56,
@@ -449,13 +694,50 @@ export async function downloadOotdLongImage({
   finalCanvas.width = width;
   finalCanvas.height = finalHeight;
   const finalCtx = finalCanvas.getContext("2d");
-  if (!finalCtx) return;
+  if (!finalCtx) return null;
   finalCtx.drawImage(canvas, 0, 0, width, finalHeight, 0, 0, width, finalHeight);
+
+  return canvasToBlob(finalCanvas);
+}
+
+export async function createOotdShareImageFile({
+  report,
+  imageUrl,
+  shareCard,
+}: {
+  report: OotdReport;
+  imageUrl?: string;
+  shareCard?: OotdShareCard | null;
+}) {
+  const blob = await createOotdShareImageBlob({ report, imageUrl, shareCard });
+  if (!blob) return null;
+  return new File([blob], `lumi-ootd-${report.id}.png`, { type: "image/png" });
+}
+
+export async function downloadOotdShareImage({
+  report,
+  imageUrl,
+  shareCard,
+}: {
+  report: OotdReport;
+  imageUrl?: string;
+  shareCard?: OotdShareCard | null;
+}) {
+  const blob = await createOotdShareImageBlob({ report, imageUrl, shareCard });
+  if (!blob) return;
+  const url = URL.createObjectURL(blob);
 
   const link = document.createElement("a");
   link.download = `lumi-ootd-${report.id}.png`;
-  link.href = finalCanvas.toDataURL("image/png");
+  link.href = url;
   link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, "image/png");
+  });
 }
 
 function drawSection(
@@ -463,11 +745,13 @@ function drawSection(
   title: string,
   body: string,
   y: number,
+  x: number,
+  width: number,
 ) {
   ctx.fillStyle = "#302D43";
   ctx.font = "800 36px Arial";
-  ctx.fillText(title, 86, y);
-  return drawTextBlock(ctx, body, 86, y + 62, 908, 34, "#5D566B", "700", 8) + 36;
+  ctx.fillText(title, x, y);
+  return drawTextBlock(ctx, body, x, y + 62, width, 34, "#5D566B", "700", 8) + 36;
 }
 
 function drawSectionDivider(
@@ -487,7 +771,7 @@ function drawSectionDivider(
 
 function drawPaletteSection(
   ctx: CanvasRenderingContext2D,
-  palette: OotdReport["palette"],
+  palette: Array<{ name?: string; hex?: string }>,
   y: number,
   x: number,
   width: number,
@@ -502,7 +786,7 @@ function drawPaletteSection(
   const swatchW = (width - gap * (count - 1)) / count;
   palette.slice(0, 3).forEach((color, index) => {
     const sx = x + index * (swatchW + gap);
-    ctx.fillStyle = color.hex;
+    ctx.fillStyle = color.hex ?? "#EAE6EE";
     roundRect(ctx, sx, y, swatchW, 86, 20);
     ctx.fill();
     ctx.strokeStyle = "rgba(48,45,67,0.08)";
@@ -510,10 +794,10 @@ function drawPaletteSection(
     ctx.stroke();
     ctx.fillStyle = "#5D566B";
     ctx.font = "800 28px Arial";
-    ctx.fillText(color.name, sx, y + 132);
+    ctx.fillText(color.name ?? "", sx, y + 132);
     ctx.fillStyle = "#9B94A5";
     ctx.font = "700 24px Arial";
-    ctx.fillText(color.hex, sx, y + 164);
+    ctx.fillText(color.hex ?? "", sx, y + 164);
   });
 
   return y + 212;
@@ -543,7 +827,7 @@ function drawListSection(
 
 function drawSuggestionSection(
   ctx: CanvasRenderingContext2D,
-  suggestions: OotdReport["suggestions"],
+  suggestions: Array<{ title?: string; body?: string }>,
   y: number,
   x: number,
   width: number,
@@ -553,10 +837,17 @@ function drawSuggestionSection(
   ctx.fillText("Fix it now", x, y);
   y += 58;
   for (const suggestion of suggestions) {
-    ctx.fillStyle = "#302D43";
-    ctx.font = "800 30px Arial";
-    ctx.fillText(suggestion.title, x, y);
-    y = drawTextBlock(ctx, suggestion.body, x, y + 42, width, 32, "#5D566B", "700", 6) + 28;
+    const title = suggestion.title?.trim();
+    const body = suggestion.body?.trim();
+    if (title) {
+      ctx.fillStyle = "#302D43";
+      ctx.font = "800 30px Arial";
+      ctx.fillText(title, x, y);
+      y += 42;
+    }
+    if (body) {
+      y = drawTextBlock(ctx, body, x, y, width, 32, "#5D566B", "700", 6) + 28;
+    }
   }
   return y;
 }
