@@ -5,17 +5,15 @@ import {
   getGoClawBaseUrl,
   resolveGoClawProxyAuth,
 } from "@/lib/api/go-claw-env";
+import {
+  resolvePublicOrigin,
+  resolvePublicRequestParts,
+} from "@/lib/api/public-origin";
 
 export const dynamic = "force-dynamic";
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
-}
-
-function frontendOrigin(request: Request) {
-  const requestUrl = new URL(request.url);
-  const host = request.headers.get("host") ?? requestUrl.host;
-  return `${requestUrl.protocol}//${host}`;
 }
 
 function normalizeShareCardLinks(value: unknown, origin: string) {
@@ -50,9 +48,8 @@ export async function POST(
   const baseUrl = getGoClawBaseUrl();
   const session = await getServerSession(authOptions);
   const auth = resolveGoClawProxyAuth(session);
-  const requestUrl = new URL(request.url);
-  const forwardedHost = request.headers.get("host") ?? requestUrl.host;
-  const forwardedProto = requestUrl.protocol.replace(":", "") || "http";
+  const { host: forwardedHost, proto: forwardedProto } =
+    resolvePublicRequestParts(request);
 
   if (!auth) {
     return NextResponse.json(
@@ -103,6 +100,6 @@ export async function POST(
 
   const payload = text.trim() ? JSON.parse(text) : {};
   return NextResponse.json(
-    normalizeShareCardLinks(payload, frontendOrigin(request)),
+    normalizeShareCardLinks(payload, resolvePublicOrigin(request)),
   );
 }
