@@ -24,6 +24,7 @@ import {
   Plus,
   Sparkles,
   Square,
+  Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,14 +46,28 @@ export function ChatSessionSwitcher({
   conversations,
   selectedId,
   creating,
+  deleting,
+  deleteDisabled,
+  deleteConfirmOpen,
+  deleteError,
   onSelect,
   onCreate,
+  onDelete,
+  onConfirmDelete,
+  onCancelDelete,
 }: {
   conversations: MochiConversation[];
   selectedId: string;
   creating: boolean;
+  deleting: boolean;
+  deleteDisabled: boolean;
+  deleteConfirmOpen: boolean;
+  deleteError: string;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  onDelete: () => void;
+  onConfirmDelete: () => void;
+  onCancelDelete: () => void;
 }) {
   return (
     <div className="fixed right-4 top-[4.15rem] z-30 flex w-[66.666vw] max-w-[520px] items-center gap-2 px-3 md:right-[max(1rem,calc((100vw-264px-760px)/2+1rem))]">
@@ -93,6 +108,59 @@ export function ChatSessionSwitcher({
           <Plus size={18} strokeWidth={2.6} aria-hidden />
         )}
       </Button>
+      <Button
+        aria-label="Delete chat session"
+        type="button"
+        variant="secondary"
+        size="icon"
+        onClick={onDelete}
+        disabled={deleteDisabled || deleting || !selectedId}
+        className="h-9 w-9 shrink-0 rounded-full text-[#8f5e66] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_12px_28px_rgba(42,39,55,0.12)] disabled:opacity-40"
+      >
+        {deleting ? (
+          <LoaderCircle size={15} className="animate-spin" aria-hidden />
+        ) : (
+          <Trash2 size={15} strokeWidth={2.4} aria-hidden />
+        )}
+      </Button>
+      {deleteConfirmOpen && (
+        <div className="absolute right-3 top-12 w-[min(18rem,calc(100vw-2rem))] rounded-[18px] border border-white/78 bg-[#fbfafc]/90 p-3 text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_18px_42px_rgba(42,39,55,0.16)] backdrop-blur-xl">
+          <p className="text-sm font-extrabold leading-5">Delete chat?</p>
+          <p className="mt-1 text-xs font-bold leading-4 text-[#6f6880]">
+            Messages and media will be removed.
+          </p>
+          <p className="mt-1 text-[0.7rem] font-bold leading-4 text-[#8b8496]">
+            Last chat starts a new one.
+          </p>
+          {deleteError && (
+            <p className="mt-2 text-xs font-bold leading-4 text-[#a8515d]">
+              {deleteError}
+            </p>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onCancelDelete}
+              disabled={deleting}
+              className="h-8 rounded-full px-3 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={onConfirmDelete}
+              disabled={deleting}
+              className="h-8 rounded-full bg-[#f4dde1] px-3 text-xs text-[#8f4d59] hover:bg-[#efd0d6]"
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

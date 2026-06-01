@@ -539,3 +539,28 @@ export async function createSessionThroughChatProxy(
 
   return toMochiConversation((await response.json()) as GoClawChatSession);
 }
+
+export async function deleteSessionThroughChatProxy(
+  sessionsProxyPath: string,
+  conversationId: string,
+): Promise<void> {
+  const url = new URL(
+    sessionsProxyPath,
+    globalThis.location?.origin ?? "http://localhost",
+  );
+  url.searchParams.set("session_id", conversationId);
+
+  const response = await fetch(url.toString(), {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      errorText || `Session delete proxy failed with ${response.status}`,
+    );
+  }
+}

@@ -51,6 +51,7 @@ export interface LumiApiClient {
   ) => Promise<UserProfile>;
   listConversations: () => Promise<MochiConversation[]>;
   createConversation: () => Promise<MochiConversation>;
+  deleteConversation: (conversationId: string) => Promise<void>;
   listMessages: (
     conversationId: string,
     sessionId?: string,

@@ -12,6 +12,7 @@ import type {
 } from "@/types/lumi";
 import {
   createSessionThroughChatProxy,
+  deleteSessionThroughChatProxy,
   fetchMessagesThroughChatProxy,
   fetchSessionsThroughChatProxy,
   sendMessageThroughChatProxy,
@@ -258,6 +259,20 @@ export function createMockClient(
       conversations = [conversation, ...conversations];
       messagesByConversation[conversation.id] = [];
       return conversation;
+    },
+    async deleteConversation(conversationId) {
+      if (options.sessionsProxyPath) {
+        return deleteSessionThroughChatProxy(
+          options.sessionsProxyPath,
+          conversationId,
+        );
+      }
+
+      await delay(180);
+      conversations = conversations.filter(
+        (conversation) => conversation.id !== conversationId,
+      );
+      delete messagesByConversation[conversationId];
     },
     async listMessages(conversationId, sessionId) {
       const resolvedSessionId = sessionId || conversationId;

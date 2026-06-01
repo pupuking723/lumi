@@ -42,6 +42,21 @@ export function createHttpClient(baseUrl: string): LumiApiClient {
         method: "POST",
         body: JSON.stringify({ agentId: "mochi" }),
       }),
+    async deleteConversation(conversationId) {
+      const url = new URL(`${root}/v1/chat/sessions`);
+      url.searchParams.set("session_id", conversationId);
+      const response = await fetch(url.toString(), {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Lumi session delete ${response.status}: ${response.statusText}`,
+        );
+      }
+    },
     listMessages: (conversationId) =>
       request(root, `/conversations/${conversationId}/messages`),
     async uploadAttachment(file) {

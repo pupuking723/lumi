@@ -8,6 +8,7 @@ import type { SendMessageInput } from "@/types/lumi";
 const apiMocks = vi.hoisted(() => ({
   listConversations: vi.fn(),
   createConversation: vi.fn(),
+  deleteConversation: vi.fn(),
   listMessages: vi.fn(),
   uploadAttachment: vi.fn(),
   sendMessage: vi.fn(),
@@ -62,6 +63,7 @@ describe("ChatView", () => {
       lastMessage: "",
       updatedAt: "2026-05-25T00:00:00.000Z",
     });
+    apiMocks.deleteConversation.mockResolvedValue(undefined);
     apiMocks.listMessages.mockResolvedValue([]);
     apiMocks.uploadAttachment.mockResolvedValue({
       media_id: "media-1",
@@ -1327,6 +1329,38 @@ ${JSON.stringify({
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Image preview" })).toBeNull(),
     );
+  });
+
+  it("deletes the selected chat session and switches to the next one", async () => {
+    apiMocks.listConversations.mockResolvedValue([
+      {
+        id: "conv-1",
+        agentId: "mochi",
+        title: "Coffee date plan",
+        lastMessage: "",
+        updatedAt: "2026-05-25T00:00:00.000Z",
+      },
+      {
+        id: "conv-2",
+        agentId: "mochi",
+        title: "Work outfit",
+        lastMessage: "",
+        updatedAt: "2026-05-24T00:00:00.000Z",
+      },
+    ]);
+    renderWithQueryClient(<ChatView />);
+
+    await screen.findByDisplayValue("Coffee date plan");
+    fireEvent.click(screen.getByRole("button", { name: "Delete chat session" }));
+    expect(screen.getByText("Delete chat?")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() =>
+      expect(apiMocks.deleteConversation).toHaveBeenCalledWith("conv-1"),
+    );
+    expect(await screen.findByDisplayValue("Work outfit")).toBeInTheDocument();
+    expect(screen.queryByText("Coffee date plan")).toBeNull();
   });
 
   it("closes the image preview with Escape and falls back for undisplayable image urls", async () => {

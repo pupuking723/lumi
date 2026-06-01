@@ -204,6 +204,9 @@ export function ChatView() {
   const [chatPanelOpen, setChatPanelOpen] = useState(true);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
+  const [deleteSessionConfirmOpen, setDeleteSessionConfirmOpen] =
+    useState(false);
+  const [deleteSessionError, setDeleteSessionError] = useState("");
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
   const [lastSendStopped, setLastSendStopped] = useState(false);
   const [uploadAuthRequired, setUploadAuthRequired] = useState(false);
@@ -282,6 +285,35 @@ export function ChatView() {
       );
       setSelectedConversationId(conversation.id);
       setChatPanelOpen(true);
+    },
+  });
+  const deleteConversationMutation = useMutation<void, Error, string>({
+    mutationFn: (id) => apiClient.deleteConversation(id),
+    onSuccess: (_, deletedId) => {
+      let remainingSessions: MochiConversation[] = [];
+      queryClient.setQueryData<MochiConversation[]>(
+        ["mochi-sessions"],
+        (current = []) => {
+          remainingSessions = current.filter((item) => item.id !== deletedId);
+          return remainingSessions;
+        },
+      );
+      queryClient.removeQueries({ queryKey: ["messages", deletedId] });
+      sessionStorage.removeItem(`live_rh_${deletedId}`);
+      setDeleteSessionConfirmOpen(false);
+      setDeleteSessionError("");
+      setLastPayload(null);
+      setLastSendStopped(false);
+      if (remainingSessions.length > 0) {
+        setSelectedConversationId(remainingSessions[0].id);
+        return;
+      }
+      createConversationMutation.mutate();
+    },
+    onError: (error) => {
+      setDeleteSessionError(
+        error instanceof Error ? error.message : "Delete failed.",
+      );
     },
   });
   const hasUploadingAttachments = attachments.some(
@@ -1989,8 +2021,29 @@ export function ChatView() {
               setSelectedConversationId(id);
               setLastPayload(null);
               setLastSendStopped(false);
+              setDeleteSessionConfirmOpen(false);
+              setDeleteSessionError("");
             }}
             onCreate={() => createConversationMutation.mutate()}
+            deleting={deleteConversationMutation.isPending}
+            deleteDisabled={sendMutation.isPending || hasUploadingAttachments}
+            deleteConfirmOpen={deleteSessionConfirmOpen}
+            deleteError={deleteSessionError}
+            onDelete={() => {
+              setDeleteSessionError("");
+              setDeleteSessionConfirmOpen((open) => !open);
+            }}
+            onConfirmDelete={() => {
+              if (!conversationId) return;
+              if (voiceActive) {
+                stopVoiceSession();
+              }
+              deleteConversationMutation.mutate(conversationId);
+            }}
+            onCancelDelete={() => {
+              setDeleteSessionConfirmOpen(false);
+              setDeleteSessionError("");
+            }}
           />
           <ChatMessagesPanel
             messageScrollRef={messageScrollRef}

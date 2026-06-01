@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ChatProxyError,
   collectGoClawEventStream,
+  deleteSessionThroughChatProxy,
   extractGoClawAssistantText,
   fetchMessagesThroughChatProxy,
   sendMessageThroughChatProxy,
@@ -384,6 +385,21 @@ describe("GoClaw chat adapter", () => {
         role: "mochi",
         content: "Hello",
       }),
+    );
+  });
+
+  it("deletes a session through the sessions proxy", async () => {
+    vi.stubGlobal("location", { origin: "https://lumi.test" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+    );
+
+    await deleteSessionThroughChatProxy("/api/chat/sessions", "mochi-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://lumi.test/api/chat/sessions?session_id=mochi-1",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 

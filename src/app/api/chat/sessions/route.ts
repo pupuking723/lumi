@@ -14,7 +14,10 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-async function proxyChatSessions(method: "GET" | "POST", request: Request) {
+async function proxyChatSessions(
+  method: "GET" | "POST" | "DELETE",
+  request: Request,
+) {
   const session = await getServerSession(authOptions);
   const auth = resolveGoClawProxyAuth(session);
 
@@ -30,6 +33,17 @@ async function proxyChatSessions(method: "GET" | "POST", request: Request) {
   const acceptLanguage = process.env.LUMI_AGENT_ACCEPT_LANGUAGE ?? "zh";
   const upstreamUrl = new URL(`${baseUrl}/v1/chat/sessions`);
   upstreamUrl.searchParams.set("model", model);
+  if (method === "DELETE") {
+    const requestUrl = new URL(request.url);
+    const sessionId = requestUrl.searchParams.get("session_id")?.trim();
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: "session_id is required." },
+        { status: 400 },
+      );
+    }
+    upstreamUrl.searchParams.set("session_id", sessionId);
+  }
 
   let upstreamResponse: Response;
   try {
@@ -68,6 +82,15 @@ async function proxyChatSessions(method: "GET" | "POST", request: Request) {
     );
   }
 
+  if (upstreamResponse.status === 204) {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   return new Response(payload, {
     status: upstreamResponse.status,
     headers: {
@@ -84,4 +107,8 @@ export function GET(request: Request) {
 
 export function POST(request: Request) {
   return proxyChatSessions("POST", request);
+}
+
+export function DELETE(request: Request) {
+  return proxyChatSessions("DELETE", request);
 }
