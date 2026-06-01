@@ -31,6 +31,7 @@ export interface MochiConversation {
   title: string;
   lastMessage: string;
   updatedAt: string;
+  messageCount?: number;
 }
 
 export interface ChatMessage {

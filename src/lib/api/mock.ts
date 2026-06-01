@@ -11,7 +11,9 @@ import type {
   VisionAnalysis,
 } from "@/types/lumi";
 import {
+  createSessionThroughChatProxy,
   fetchMessagesThroughChatProxy,
+  fetchSessionsThroughChatProxy,
   sendMessageThroughChatProxy,
 } from "./go-claw-chat";
 import type {
@@ -70,6 +72,7 @@ let looks: LookCard[] = [...seedLooks];
 interface MockClientOptions {
   chatProxyPath?: string;
   messagesProxyPath?: string;
+  sessionsProxyPath?: string;
   uploadProxyPath?: string;
   ootdReportProxyPath?: string;
 }
@@ -232,10 +235,18 @@ export function createMockClient(
       return userProfile;
     },
     async listConversations() {
+      if (options.sessionsProxyPath) {
+        return fetchSessionsThroughChatProxy(options.sessionsProxyPath);
+      }
+
       await delay(180);
       return conversations;
     },
     async createConversation() {
+      if (options.sessionsProxyPath) {
+        return createSessionThroughChatProxy(options.sessionsProxyPath);
+      }
+
       await delay(240);
       const conversation: MochiConversation = {
         id: id("conv"),
@@ -249,11 +260,12 @@ export function createMockClient(
       return conversation;
     },
     async listMessages(conversationId, sessionId) {
-      if (options.messagesProxyPath && sessionId) {
+      const resolvedSessionId = sessionId || conversationId;
+      if (options.messagesProxyPath && resolvedSessionId) {
         return fetchMessagesThroughChatProxy(
           options.messagesProxyPath,
           conversationId,
-          sessionId,
+          resolvedSessionId,
         );
       }
 

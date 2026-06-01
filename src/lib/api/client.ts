@@ -73,6 +73,7 @@ export function createLumiApiClient(): LumiApiClient {
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
   const chatProxyPath = process.env.NEXT_PUBLIC_LUMI_CHAT_PROXY_PATH;
   const messagesProxyPath = process.env.NEXT_PUBLIC_LUMI_MESSAGES_PROXY_PATH;
+  const sessionsProxyPath = process.env.NEXT_PUBLIC_LUMI_SESSIONS_PROXY_PATH;
   const uploadProxyPath = process.env.NEXT_PUBLIC_LUMI_UPLOAD_PROXY_PATH;
   const ootdReportProxyPath = process.env.NEXT_PUBLIC_LUMI_OOTD_REPORT_PROXY_PATH;
   return baseUrl
@@ -86,6 +87,10 @@ export function createLumiApiClient(): LumiApiClient {
           messagesProxyPath === "off"
             ? undefined
             : (messagesProxyPath ?? "/api/chat/messages"),
+        sessionsProxyPath:
+          sessionsProxyPath === "off"
+            ? undefined
+            : (sessionsProxyPath ?? "/api/chat/sessions"),
         uploadProxyPath:
           uploadProxyPath === "off"
             ? undefined

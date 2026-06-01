@@ -15,6 +15,7 @@ import {
   BottomActionControls,
   ChatComposer,
   ChatMessagesPanel,
+  ChatSessionSwitcher,
   MediaMenuLayer,
   StandaloneMediaButton,
 } from "./chat/chat-view-ui";
@@ -24,7 +25,6 @@ import {
 } from "./ootd-report-modal";
 import { apiClient } from "@/lib/api/client";
 import { isOotdReportChatError } from "@/lib/api/go-claw-chat";
-import { getOrCreateMochiSessionId } from "@/lib/session/mochi-session";
 import {
   bytesToBase64,
   getLiveWebSocketUrl,
@@ -49,6 +49,7 @@ import type { PendingAttachment } from "./chat/chat-types";
 import type {
   ChatAttachment,
   ChatMessage,
+  MochiConversation,
   OotdReport,
   OotdShareCard,
   SendMessageInput,
@@ -181,6 +182,9 @@ export function ChatView() {
   const liveReconnectTimerRef = useRef<number | null>(null);
   const liveSessionGenerationRef = useRef(0);
   const liveCaptureGenerationRef = useRef(0);
+  const connectLiveSocketRef = useRef<
+    (captureRequested: boolean) => Promise<void>
+  >(async () => undefined);
   const liveSocketReadyRef = useRef(false);
   const liveCaptureRequestedRef = useRef(false);
   const liveSentMediaIdsRef = useRef<Set<string>>(new Set());
@@ -199,15 +203,7 @@ export function ChatView() {
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
   const [chatPanelOpen, setChatPanelOpen] = useState(true);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  const [sessionId, setSessionId] = useState(() =>
-    typeof window === "undefined" ? "" : getOrCreateMochiSessionId(),
-  );
-  // 从 sessionStorage 恢复 resumption token（页面刷新后仍可快速重连）
-  useEffect(() => {
-    if (!sessionId) return;
-    const stored = sessionStorage.getItem(`live_rh_${sessionId}`);
-    if (stored) liveResumptionHandleRef.current = stored;
-  }, [sessionId]);
+  const [selectedConversationId, setSelectedConversationId] = useState("");
   const [lastPayload, setLastPayload] = useState<SendMessageInput | null>(null);
   const [lastSendStopped, setLastSendStopped] = useState(false);
   const [uploadAuthRequired, setUploadAuthRequired] = useState(false);
@@ -238,14 +234,31 @@ export function ChatView() {
   const [activeOotdReportSummary, setActiveOotdReportSummary] = useState("");
 
   const conversationQuery = useQuery({
-    queryKey: ["mochi-conversation"],
+    queryKey: ["mochi-sessions"],
     queryFn: async () => {
       const conversations = await apiClient.listConversations();
-      return conversations[0] ?? apiClient.createConversation();
+      return conversations.length
+        ? conversations
+        : [await apiClient.createConversation()];
     },
   });
 
-  const conversationId = conversationQuery.data?.id;
+  const conversations = useMemo(
+    () => conversationQuery.data ?? [],
+    [conversationQuery.data],
+  );
+
+  const conversationId =
+    conversations.find(
+      (conversation) => conversation.id === selectedConversationId,
+    )?.id ?? conversations[0]?.id;
+  const sessionId = conversationId ?? "";
+  // 从 sessionStorage 恢复 resumption token（页面刷新后仍可快速重连）
+  useEffect(() => {
+    if (!sessionId) return;
+    const stored = sessionStorage.getItem(`live_rh_${sessionId}`);
+    if (stored) liveResumptionHandleRef.current = stored;
+  }, [sessionId]);
   const messagesKey = useMemo(
     () => ["messages", conversationId, sessionId] as const,
     [conversationId, sessionId],
@@ -257,6 +270,20 @@ export function ChatView() {
     queryFn: () => apiClient.listMessages(conversationId as string, sessionId),
   });
   const messages = useMemo(() => messagesQuery.data ?? [], [messagesQuery.data]);
+  const createConversationMutation = useMutation<MochiConversation, Error>({
+    mutationFn: () => apiClient.createConversation(),
+    onSuccess: (conversation) => {
+      queryClient.setQueryData<MochiConversation[]>(
+        ["mochi-sessions"],
+        (current = []) => [
+          conversation,
+          ...current.filter((item) => item.id !== conversation.id),
+        ],
+      );
+      setSelectedConversationId(conversation.id);
+      setChatPanelOpen(true);
+    },
+  });
   const hasUploadingAttachments = attachments.some(
     (attachment) => attachment.uploadStatus === "uploading",
   );
@@ -991,7 +1018,12 @@ export function ChatView() {
       liveSocketReadyRef.current = false;
 
       const generation = ++liveSessionGenerationRef.current;
-      const liveSessionId = sessionId || getOrCreateMochiSessionId();
+      const liveSessionId = sessionId;
+      if (!liveSessionId) {
+        setVoiceStatus("idle");
+        setVoiceError("Choose a chat session before starting live voice.");
+        return;
+      }
       const resumeHandle = liveResumptionHandleRef.current;
       const socket = new WebSocket(getLiveWebSocketUrl(liveSessionId, resumeHandle));
       liveSocketRef.current = socket;
@@ -1058,7 +1090,7 @@ export function ChatView() {
         }
         if (eventType === "live_go_away") {
           // GoAway 预警：提前重连，用户无感知
-          void connectLiveSocket(liveCaptureRequestedRef.current);
+          void connectLiveSocketRef.current(liveCaptureRequestedRef.current);
           return;
         }
         if (eventType === "live_setup_complete") {
@@ -1171,7 +1203,7 @@ export function ChatView() {
         if (resumeHandle && !setupCompleted && !liveManualStopRef.current && liveSessionGenerationRef.current === generation) {
           liveResumptionHandleRef.current = null;
           if (sessionId) sessionStorage.removeItem(`live_rh_${sessionId}`);
-          void connectLiveSocket(liveCaptureRequestedRef.current);
+          void connectLiveSocketRef.current(liveCaptureRequestedRef.current);
           return;
         }
         if (
@@ -1231,6 +1263,10 @@ export function ChatView() {
       upsertLiveUserTranscript,
     ],
   );
+
+  useEffect(() => {
+    connectLiveSocketRef.current = connectLiveSocket;
+  }, [connectLiveSocket]);
 
   const prewarmLiveSession = useCallback(async () => {
     if (
@@ -1605,7 +1641,8 @@ export function ChatView() {
     chatPanelOpen &&
     !voiceActive &&
     (hasComposerContent || sendMutation.isPending);
-  const textComposerOpen = chatPanelOpen && !voiceActive;
+  const textComposerOpen =
+    chatPanelOpen && !voiceActive && Boolean(conversationId);
   const showPendingIndicator =
     sendMutation.isPending && !streamingAssistant?.content;
 
@@ -1818,8 +1855,8 @@ export function ChatView() {
 
     if (!content && !readyAttachments.length && !imageUrl) return;
 
-    const currentSessionId = sessionId || getOrCreateMochiSessionId();
-    if (!sessionId) setSessionId(currentSessionId);
+    const currentSessionId = sessionId;
+    if (!currentSessionId) return;
     const includeOotdContext = readyAttachments.length === 0;
 
     const retryPayload: SendMessageInput = {
@@ -1944,6 +1981,17 @@ export function ChatView() {
       />
       {chatPanelOpen && (
         <>
+          <ChatSessionSwitcher
+            conversations={conversations}
+            selectedId={conversationId ?? ""}
+            creating={createConversationMutation.isPending}
+            onSelect={(id) => {
+              setSelectedConversationId(id);
+              setLastPayload(null);
+              setLastSendStopped(false);
+            }}
+            onCreate={() => createConversationMutation.mutate()}
+          />
           <ChatMessagesPanel
             messageScrollRef={messageScrollRef}
             messages={messages}

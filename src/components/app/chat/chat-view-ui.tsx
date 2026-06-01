@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
   Camera,
+  ChevronDown,
   Images,
   LoaderCircle,
   MessageCircle,
@@ -33,8 +34,68 @@ import {
 } from "@/lib/ootd-report-content";
 import { cn } from "@/lib/utils";
 import type { LiveConnectionStatus } from "@/lib/live/ws-client";
-import type { ChatAttachment, ChatMessage } from "@/types/lumi";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  MochiConversation,
+} from "@/types/lumi";
 import type { PendingAttachment } from "./chat-types";
+
+export function ChatSessionSwitcher({
+  conversations,
+  selectedId,
+  creating,
+  onSelect,
+  onCreate,
+}: {
+  conversations: MochiConversation[];
+  selectedId: string;
+  creating: boolean;
+  onSelect: (id: string) => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="fixed right-4 top-[4.15rem] z-30 flex w-[66.666vw] max-w-[520px] items-center gap-2 px-3 md:right-[max(1rem,calc((100vw-264px-760px)/2+1rem))]">
+      <label className="relative min-w-0 flex-1">
+        <span className="sr-only">Chat session</span>
+        <select
+          value={selectedId}
+          onChange={(event) => onSelect(event.target.value)}
+          className="h-9 w-full appearance-none rounded-full border border-white/80 bg-[#fbfafc]/88 pl-3 pr-9 text-xs font-extrabold text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.92)_inset,0_12px_28px_rgba(46,43,60,0.1)] outline-none backdrop-blur-xl"
+        >
+          {conversations.length === 0 && (
+            <option value="">Loading chat</option>
+          )}
+          {conversations.map((conversation) => (
+            <option key={conversation.id} value={conversation.id}>
+              {conversation.title}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={14}
+          aria-hidden
+          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6f6880]"
+        />
+      </label>
+      <Button
+        aria-label="New chat session"
+        type="button"
+        variant="secondary"
+        size="icon"
+        onClick={onCreate}
+        disabled={creating}
+        className="h-9 w-9 shrink-0 rounded-full text-[#302d43] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset,0_12px_28px_rgba(42,39,55,0.12)]"
+      >
+        {creating ? (
+          <LoaderCircle size={16} className="animate-spin" aria-hidden />
+        ) : (
+          <Plus size={18} strokeWidth={2.6} aria-hidden />
+        )}
+      </Button>
+    </div>
+  );
+}
 
 export function ChatMessagesPanel({
   messageScrollRef,

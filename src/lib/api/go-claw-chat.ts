@@ -1,6 +1,7 @@
 import type {
   ChatAttachment,
   ChatMessage,
+  MochiConversation,
   SendMessageInput,
   SendMessageResult,
 } from "@/types/lumi";
@@ -37,6 +38,20 @@ export interface GoClawChatCompletion {
 export interface GoClawSessionMessages {
   session_id?: string;
   messages?: GoClawSessionMessage[];
+}
+
+export interface GoClawChatSession {
+  session_id: string;
+  agent_id?: string;
+  title?: string;
+  last_message?: string;
+  message_count?: number;
+  updated_at?: string;
+}
+
+export interface GoClawChatSessionsResponse {
+  sessions?: GoClawChatSession[];
+  total?: number;
 }
 
 interface GoClawSessionMessage {
@@ -218,6 +233,17 @@ export function toLumiChatMessages(
       };
     })
     .filter((message): message is ChatMessage => message !== null);
+}
+
+function toMochiConversation(session: GoClawChatSession): MochiConversation {
+  return {
+    id: session.session_id,
+    agentId: "mochi",
+    title: session.title?.trim() || "New chat",
+    lastMessage: session.last_message?.trim() || "",
+    updatedAt: session.updated_at || now(),
+    messageCount: session.message_count,
+  };
 }
 
 function getSseDataLines(rawEvent: string) {
@@ -464,4 +490,52 @@ export async function fetchMessagesThroughChatProxy(
     conversationId,
     (await response.json()) as GoClawSessionMessages,
   );
+}
+
+export async function fetchSessionsThroughChatProxy(
+  sessionsProxyPath: string,
+): Promise<MochiConversation[]> {
+  const url = new URL(
+    sessionsProxyPath,
+    globalThis.location?.origin ?? "http://localhost",
+  );
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      errorText || `Sessions proxy failed with ${response.status}`,
+    );
+  }
+
+  const payload = (await response.json()) as GoClawChatSessionsResponse;
+  return (payload.sessions ?? []).map(toMochiConversation);
+}
+
+export async function createSessionThroughChatProxy(
+  sessionsProxyPath: string,
+): Promise<MochiConversation> {
+  const response = await fetch(sessionsProxyPath, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      errorText || `Session create proxy failed with ${response.status}`,
+    );
+  }
+
+  return toMochiConversation((await response.json()) as GoClawChatSession);
 }
